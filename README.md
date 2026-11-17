@@ -32,9 +32,7 @@ The game is laid out for exactly 16:9: a slim sidebar of 188 px (15%) plus the l
 3. Press Play and record the screen (e.g. Cmd+Shift+5 on a Mac), or use Unity's free Recorder
    package (Window > Package Manager > Unity Registry > Recorder), Movie output, 1920 x 1080, 60 fps.
 
-## Visual design (AI-focus "lite" build)
-Cosmetics were removed so the AI is what you see: no rain, fog, lightning, night darkening, fireflies,
-glows, particles, shadows, checkered grass, dizzy stars, falling birds, scythe arc or sunrise scene.
+## AI-focus build
 Kept on purpose because they show the AI working: mud (A* weights), fallen logs (A* re-plans),
 shambler intent bubbles and Tab bars, Stalker sight ring, Pip's repair line, pack lines, sidebar chips and log.
 - Tested on 300 random maps: no tree within 2 cells of an edge, no tree cut off, 5 logs every night.
