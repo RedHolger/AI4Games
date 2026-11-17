@@ -1,4 +1,4 @@
-# Orchard of the Last Season (Unity port)
+# Orchard of the Last Season
 
 Exact Unity replica of the HTML version: same map generation, same AI, same sprites,
 same sidebar, HUD, event log, overlays and night transitions.
