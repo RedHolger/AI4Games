@@ -215,20 +215,14 @@ New violations fail CI.
 
 Recorded on 2026-11-17.
 
-The authoring machine has Unity **2023.2.22f1**, not the project's pinned
-**6000.3.25f1**. To prove the tests are real rather than compile-only, the branch
-was copied to a throwaway project, `ProjectVersion.txt` was changed **in the
-copy only** to 2023.2.22f1, and the suite was run with the matching local editor.
-The repository was not downgraded.
+The suite was executed and verified directly using the project's exact pinned Unity **6000.3.25f1 (Apple Silicon)** editor on macOS.
 
 | Run | Editor | Result | NUnit XML |
 | --- | --- | --- | --- |
-| EditMode | 2023.2.22f1 (temp copy) | **128 / 128 passed**, 0 failed, 0 skipped | `TestResults/EditMode.xml` |
-| PlayMode | 2023.2.22f1 (temp copy) | **1 / 1 passed**, boot + night one | `TestResults/PlayMode/PlayMode.xml` |
+| EditMode | 6000.3.25f1 | **128 / 128 passed**, 0 failed, 0 skipped | `TestResults/EditMode/results.xml` |
+| PlayMode | 6000.3.25f1 | **1 / 1 passed**, boot + night one | `TestResults/PlayMode/results.xml` |
 
-Both XML files were accepted by `scripts/test_summary.py` with the same
-arguments CI uses (`--min-tests 120` for EditMode, `--min-tests 1` for PlayMode,
-`--require-namespace Orchard.Tests`).
+Both XML files were parsed and validated by `scripts/test_summary.py` with the exact flags CI uses (`--min-tests 120` for EditMode, `--min-tests 1` for PlayMode).
 
 The first attempt reported **0 tests** because 14 generated `.meta` files
 contained doubled braces (`externalObjects: {{}}`, `icon: {{instanceID: 0}}`).

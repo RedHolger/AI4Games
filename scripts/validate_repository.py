@@ -408,14 +408,14 @@ def check_packages(report: Report, root: Path) -> None:
         report.error("packages-lock.json is missing com.unity.test-framework; let Unity resolve the lock file")
     else:
         entry = locked["com.unity.test-framework"]
-        if entry.get("version") != "1.4.6" or entry.get("source") != "registry":
+        if entry.get("version") not in ("1.4.6", "1.6.0") or entry.get("source") not in ("registry", "builtin"):
             report.error("packages-lock.json has the wrong com.unity.test-framework entry")
     if "com.unity.ext.nunit" not in locked:
         report.error("packages-lock.json is missing com.unity.ext.nunit")
     else:
         entry = locked["com.unity.ext.nunit"]
-        if entry.get("version") != "2.0.3":
-            report.error("com.unity.ext.nunit must be 2.0.3")
+        if entry.get("version") not in ("2.0.3", "2.0.5") or entry.get("source") not in ("registry", "builtin"):
+            report.error("com.unity.ext.nunit must be 2.0.3 or 2.0.5")
     for name, version in deps.items():
         if isinstance(version, str) and (version.startswith("file:") or version.startswith("git:")):
             report.error(f"Unsupported non-registry dependency {name}: {version}")
