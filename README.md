@@ -1,8 +1,5 @@
 # Orchard of the Last Season
 
-Exact Unity replica of the HTML version: same map generation, same AI, same sprites,
-same sidebar, HUD, event log, overlays and night transitions.
-
 ## How to open and play
 1. Unzip this folder anywhere.
 2. Open Unity Hub, click Add, then "Add project from disk", and select the
