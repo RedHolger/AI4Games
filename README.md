@@ -38,7 +38,8 @@ glows, particles, shadows, checkered grass, dizzy stars, falling birds, scythe a
 Kept on purpose because they show the AI working: mud (A* weights), fallen logs (A* re-plans),
 shambler intent bubbles and Tab bars, Stalker sight ring, Pip's repair line, pack lines, sidebar chips and log.
 - Tested on 300 random maps: no tree within 2 cells of an edge, no tree cut off, 5 logs every night.
-![Uploading image.png…]()
+<img width="2920" height="1636" alt="image" src="https://github.com/user-attachments/assets/ad04aad3-e8e1-4a98-90b3-24c989426ae8" />
+
 
 ## Scatterlings
 - A scatterling caught by a bad bird is gone for good: next night only the survivors fly.
