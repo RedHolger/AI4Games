@@ -36,6 +36,8 @@ The game is laid out for exactly 16:9: a slim sidebar of 188 px (15%) plus the l
 Kept on purpose because they show the AI working: mud (A* weights), fallen logs (A* re-plans),
 shambler intent bubbles and Tab bars, Stalker sight ring, Pip's repair line, pack lines, sidebar chips and log.
 - Tested on 300 random maps: no tree within 2 cells of an edge, no tree cut off, 5 logs every night.
+<img width="2940" height="1912" alt="image" src="https://github.com/user-attachments/assets/cb6ae03c-d8fd-463f-a383-3d7df0d7d474" />
+
 <img width="2920" height="1636" alt="image" src="https://github.com/user-attachments/assets/ad04aad3-e8e1-4a98-90b3-24c989426ae8" />
 
 
