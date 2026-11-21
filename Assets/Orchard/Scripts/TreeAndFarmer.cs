@@ -9,7 +9,7 @@ namespace Orchard
         public bool alive;
         public int fruit;
         public double flash, healGlow, firstHit;
-        public double diedAt;
+        public double diedAt, revived;
 
         public TreeEntity(int cx, int cy)
         {
@@ -56,28 +56,34 @@ namespace Orchard
         public int dir = 1;
         public double swing = 0, walk = 0;
         public bool moving = false;
-        public double hp = C.FARMER_HP, invuln = 0, sinceHit = 99;
-
-        // a stalker bit him: lose hp, then a short grace period so he can run away
-        public bool Hurt(double dmg)
-        {
-            if (invuln > 0 || hp <= 0) return false;
-            hp = System.Math.Max(0, hp - dmg);
-            invuln = C.FARMER_INVULN;
-            sinceHit = 0;
-            return true;
-        }
+        public double stun = 0, kbx = 0, kby = 0;   // knocked back by a shambler
 
         public Farmer(double x, double y)
         {
             this.x = x; this.y = y; r = 15;
         }
 
+        // pushed away from the attacker and dazed for a moment (cannot move or swing)
+        public void KnockBack(Pos from, double strength, double dazed)
+        {
+            double dx = x - from.x, dy = y - from.y;
+            double l = U.hypot(dx, dy);
+            if (l < 0.01) { dx = 1; dy = 0; l = 1; }
+            kbx = dx / l * strength; kby = dy / l * strength;
+            stun = dazed;
+        }
+
         public void update(double dt)
         {
-            if (invuln > 0) invuln -= dt;
-            sinceHit += dt;
-            if (sinceHit > C.FARMER_REGEN_DELAY && hp < C.FARMER_HP) hp = System.Math.Min(C.FARMER_HP, hp + C.FARMER_REGEN * dt);
+            if (stun > 0)
+            {
+                stun -= dt;
+                Steering.moveFree(this, kbx * dt, kby * dt);
+                kbx *= System.Math.Max(0, 1 - 6 * dt); kby *= System.Math.Max(0, 1 - 6 * dt);
+                moving = false;
+                if (swing > 0) swing -= dt;
+                return;
+            }
             System.Collections.Generic.HashSet<string> k = U.G.keys;
             double mx = 0, my = 0;
             if (k.Contains("w") || k.Contains("arrowup")) my -= 1;

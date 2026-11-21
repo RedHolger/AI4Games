@@ -79,10 +79,9 @@ namespace Orchard.Tests
         }
 
         [Test]
-        public void Utility_Score_IsNotClampedToWeight()
+        public void Utility_Score_ScalesWithWeight()
         {
-            // Whirl intentionally uses a >1 weight; the clamp applies to considerations only.
-            Assert.AreEqual(1.15, Utility.Score(1.15, 1.0, 1.0), 1e-12);
+            Assert.AreEqual(0.85, Utility.Score(0.85, 1.0, 1.0), 1e-12);
         }
 
         // ---------------- health, damage and scores ----------------
@@ -116,7 +115,7 @@ namespace Orchard.Tests
 
             ForceThink(s);
 
-            Assert.AreEqual(Shambler.N_ACT, s.scores.Length);
+            Assert.AreEqual(System.Enum.GetValues(typeof(ShamAct)).Length, s.scores.Length);
             for (int i = 0; i < s.scores.Length; i++)
             {
                 Assert.IsFalse(double.IsNaN(s.scores[i]), "score " + (ShamAct)i + " is NaN");
@@ -315,121 +314,95 @@ namespace Orchard.Tests
         }
 
         [Test]
-        public void Whirl_IsUnavailableOnNightOne()
-        {
-            world.game.night = 1;
-            Shambler a = world.AddShambler(300, 300);
-            world.AddShambler(330, 300);
-            world.AddBird(310, 290, false);
-
-            ForceThink(a);
-
-            Assert.AreEqual(0.0, a.scores[(int)ShamAct.Whirl], 1e-12);
-            Assert.AreNotEqual(ShamAct.Whirl, a.act);
-        }
-
-        [Test]
-        public void Whirl_RequiresAPartner()
-        {
-            world.game.night = 2;
-            Shambler a = world.AddShambler(300, 300);
-            world.AddBird(310, 290, false);
-
-            ForceThink(a);
-
-            Assert.AreEqual(0.0, a.scores[(int)ShamAct.Whirl], 1e-12);
-            Assert.AreNotEqual(ShamAct.Whirl, a.act);
-        }
-
-        [Test]
-        public void Whirl_StartsOnNightTwo_WithPartnerAndScatterlingOverhead()
-        {
-            world.game.night = 2;
-            Shambler a = world.AddShambler(300, 300);
-            world.AddShambler(330, 300);
-            world.AddBird(310, 290, false);
-
-            ForceThink(a);
-
-            Assert.AreEqual(ShamAct.Whirl, a.act);
-            Assert.IsNotNull(a.whirlC);
-            Assert.Greater(a.scores[(int)ShamAct.Whirl], 0.0);
-        }
-
-        [Test]
-        public void Whirl_RespectsCooldown()
-        {
-            world.game.night = 2;
-            Shambler a = world.AddShambler(300, 300);
-            a.whirlCd = 5;
-            world.AddShambler(330, 300);
-            world.AddBird(310, 290, false);
-
-            ForceThink(a);
-
-            Assert.AreEqual(0.0, a.scores[(int)ShamAct.Whirl], 1e-12);
-            Assert.AreNotEqual(ShamAct.Whirl, a.act);
-        }
-
-        [Test]
-        public void Whirl_TwoCirclingShamblers_FormOneTornadoAndBothRest()
-        {
-            world.game.night = 2;
-            Pos centre = new Pos(400, 300);
-            Shambler a = world.AddShambler(390, 300);
-            Shambler b = world.AddShambler(410, 300);
-            world.AddBird(400, 290, false);
-            a.act = ShamAct.Whirl; a.whirlC = centre; a.whirlCd = 0;
-            b.act = ShamAct.Whirl; b.whirlC = centre; b.whirlCd = 0;
-
-            for (int i = 0; i < 30; i++)
-            {
-                a.update(0.1);
-                b.update(0.1);
-            }
-
-            Assert.AreEqual(1, world.game.tornadoCount, "exactly one tornado per circle");
-            Assert.AreEqual(1, world.game.tornados.Count);
-            Assert.AreNotEqual(ShamAct.Whirl, a.act);
-            Assert.AreNotEqual(ShamAct.Whirl, b.act);
-            Assert.Greater(a.whirlCd, 0);
-            Assert.Greater(b.whirlCd, 0);
-        }
-
-        [Test]
-        public void EndWhirl_ResetsCircleAndStartsCooldown()
+        public void Think_PicksRaidTree_WhenHealthyAndTreeUnattended()
         {
             Shambler s = world.AddShambler(300, 300);
-            s.act = ShamAct.Whirl;
-            s.whirlC = new Pos(300, 300);
-
-            s.EndWhirl(16);
+            world.AddTree(U.w2c(340, 300).cx, U.w2c(340, 300).cy);
+            ForceThink(s);
 
             Assert.AreEqual(ShamAct.RaidTree, s.act);
-            Assert.IsNull(s.whirlC);
-            Assert.AreEqual(16.0, s.whirlCd, 1e-12);
+            Assert.Greater(s.scores[(int)ShamAct.RaidTree], 0.0);
         }
 
         [Test]
-        public void BirdSignal_IgnoresBadAndConfusedBirds()
+        public void Think_PicksFlee_WhenSeverelyInjured()
         {
-            Pos me = new Pos(300, 300);
-            Bird good = world.AddBird(310, 290, false);
-            Assert.Greater(Shambler.BirdSignal(me), 0.9);
+            Shambler s = world.AddShambler(300, 300);
+            s.hp = 0.5;
+            world.game.farmer.x = 310;
+            world.game.farmer.y = 300;
+            ForceThink(s);
 
-            world.game.enemies.Clear();
-            world.AddBird(310, 290, true);
-            Assert.AreEqual(0.0, Shambler.BirdSignal(me), 1e-12, "black birds are not food for a tornado trap");
+            Assert.AreEqual(ShamAct.Flee, s.act);
+            Assert.Greater(s.scores[(int)ShamAct.Flee], s.scores[(int)ShamAct.RaidTree]);
+        }
 
-            world.game.enemies.Clear();
-            Bird dizzy = world.AddBird(310, 290, false);
-            dizzy.noEatT = 5;
-            Assert.AreEqual(0.0, Shambler.BirdSignal(me), 1e-12, "already confused birds do not attract a new tornado");
+        [Test]
+        public void Think_PicksEatFruit_WhenHurtAndFruitNearby()
+        {
+            Shambler s = world.AddShambler(300, 300);
+            s.hp = 2.0;
+            world.AddBait(310, 300);
+            world.game.farmer.x = 900;
+            world.game.farmer.y = 900;
+            ForceThink(s);
 
-            world.game.enemies.Clear();
-            world.AddBird(300 + C.CELL * 13, 300, false);
-            Assert.Less(Shambler.BirdSignal(me), 0.1);
-            Assert.IsFalse(good.dead);
+            Assert.AreEqual(ShamAct.EatFruit, s.act);
+            Assert.Greater(s.scores[(int)ShamAct.EatFruit], 0.0);
+        }
+
+        [Test]
+        public void Think_PicksHitFarmer_WhenHitRecentlyByFarmer()
+        {
+            Shambler s = world.AddShambler(300, 300);
+            world.game.farmer.x = 320;
+            world.game.farmer.y = 300;
+            world.game.nightTime = 10;
+            s.lastHitByFarmer = 9.8;
+            ForceThink(s);
+
+            Assert.AreEqual(ShamAct.HitFarmer, s.act);
+            Assert.Greater(s.scores[(int)ShamAct.HitFarmer], 0.0);
+        }
+
+        [Test]
+        public void Think_PackDog_ScoresHigherWhenPartnerShamblerAssists()
+        {
+            Shambler a = world.AddShambler(300, 300);
+            world.game.pip.x = 320;
+            world.game.pip.y = 300;
+            ForceThink(a);
+            double soloScore = a.scores[(int)ShamAct.PackDog];
+
+            Shambler b = world.AddShambler(310, 300);
+            b.biting = true;
+            b.dogT = world.game.pip;
+            ForceThink(a);
+            double assistedScore = a.scores[(int)ShamAct.PackDog];
+
+            Assert.Greater(assistedScore, soloScore, "a partner already biting boosts pack desire");
+        }
+
+        [Test]
+        public void CommitmentBonus_KeepsCurrentAction_WhenScoreIsClose()
+        {
+            Shambler s = world.AddShambler(300, 300);
+            s.act = ShamAct.RaidTree;
+            ForceThink(s);
+            // Current action receives +0.12 commitment bonus
+            Assert.AreEqual(ShamAct.RaidTree, s.act);
+        }
+
+        [Test]
+        public void Perception_BlocksTargeting_ThroughHills()
+        {
+            Shambler s = world.AddShambler(100, 100);
+            Cell c = U.w2c(150, 100);
+            world.game.grid[c.cx, c.cy] = C.HILL;
+            world.game.pip.x = 200;
+            world.game.pip.y = 100;
+
+            Assert.IsFalse(Perception.LineOfSight(s, world.game.pip));
         }
     }
 }

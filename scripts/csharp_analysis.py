@@ -335,7 +335,7 @@ def analyze_file(path: Path, root: Path) -> list[Violation]:
             "",
         ))
     elif rel.startswith("Assets/Orchard/Editor/") and not all(
-        n in {"Orchard", "Orchard.CI", "Orchard.Editor"} for n in names
+        n in {"Orchard", "Orchard.CI", "Orchard.Editor", "Orchard.EditorTools"} for n in names
     ):
         violations.append(Violation(
             "namespace.contract", "error", rel, 0,

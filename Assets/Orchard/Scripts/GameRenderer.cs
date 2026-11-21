@@ -72,6 +72,9 @@ namespace Orchard
             pixel = Shapes.Pixel();
             tuft = Shapes.Tuft();
             BuildDashes(220 * 0.55f, 220 * 0.45f, 6, 5);
+            texGlow = Shapes.Radial(128, 0);
+            texDark = Shapes.Radial(256, 1);
+            texVign = Shapes.Radial(256, 2);
         }
 
         static RenderTexture MakeRT(int w, int h)
@@ -239,6 +242,11 @@ namespace Orchard
             l.endColor = c;
         }
 
+        void Shadow(double x, double y, double rx)
+        {
+            FillEllipse(x, y, rx, rx * 0.45f, new Color(0, 0, 0, .22f));
+        }
+
         void DrawTuft(double x, double y)
         {
             SpriteRenderer r = Next();
@@ -299,7 +307,25 @@ namespace Orchard
         }
 
         // ================= visual layer (draw only, never touches game state) =================
-        double vt;
+        class Particle { public double x, y, vx, vy, life, max, size, g; public Color col; public bool leaf, splash; }
+        class Firefly { public double x, y, a, p, s; }
+        List<Particle> parts = new List<Particle>();
+        List<Firefly> flies = new List<Firefly>();
+        Dictionary<Enemy, double> lastHp = new Dictionary<Enemy, double>();
+        List<Enemy> goneTmp = new List<Enemy>();
+        HashSet<Enemy> seenTmp = new HashSet<Enemy>();
+        List<Bait> lastBaits = new List<Bait>();
+        HashSet<TreeEntity> reviveBurst = new HashSet<TreeEntity>();
+        int lastSaved, lastLost;
+        double vt, bolt, boltNext = 9;
+        uint vseed = 987654321;
+        Sprite texGlow, texDark, texVign;
+
+        double vr()
+        {
+            unchecked { vseed = vseed * 1103515245u + 12345u; }
+            return ((vseed >> 8) & 0xffffff) / 16777216.0;
+        }
 
         static double vhash(int a, int b, int c)
         {
@@ -316,6 +342,18 @@ namespace Orchard
         static Color WithA(Color c, double mul) { return new Color(c.r, c.g, c.b, (float)(c.a * mul)); }
 
         void E(double cx, double cy, double rx, double ry, Color c) { FillEllipse(cx, cy, rx, ry, c); }
+
+        void Soft(Sprite tex, Color c, double alpha, double cx, double cy, double rx, double ry)
+        {
+            SpriteRenderer r = Next();
+            r.sprite = tex;
+            r.flipX = false;
+            r.color = new Color(c.r, c.g, c.b, (float)alpha);
+            Transform t = r.transform;
+            t.localPosition = new Vector3((float)cx, (float)(-cy), 0);
+            t.localRotation = Quaternion.identity;
+            t.localScale = new Vector3((float)(rx * 2), (float)(ry * 2), 1);
+        }
 
         void StrokeEllipse(double cx, double cy, double rx, double ry, double width, Color c)
         {
@@ -345,6 +383,18 @@ namespace Orchard
 
         static Color HpCol(double f) { return f > 0.6 ? U.hex(0x8fd36a) : (f > 0.3 ? U.hex(0xe3b341) : U.hex(0xe0573e)); }
 
+        void Emit(double x, double y, int n, Color col, double spd, double life, double size, double up, double grav)
+        {
+            for (int i = 0; i < n; i++)
+            {
+                double a = vr() * 6.283, s = spd * (0.4 + vr() * 0.6);
+                Particle p = new Particle();
+                p.x = x; p.y = y; p.vx = System.Math.Cos(a) * s; p.vy = System.Math.Sin(a) * s - up;
+                p.life = life; p.max = life; p.size = size * (0.6 + vr() * 0.6); p.col = col; p.g = grav;
+                parts.Add(p);
+            }
+        }
+
         static bool CellIs(OrchardGame g, int x, int y, int v) { return x >= 0 && y >= 0 && x < C.GW && y < C.GH && g.grid[x, y] == v; }
 
         // a cell plus bridges to its right / lower / diagonal neighbours, so blobs merge into one shape
@@ -364,22 +414,50 @@ namespace Orchard
 
         void DrawGround()
         {
-            FillRect(0, 0, C.VW, C.VH, U.hex(0x4c7a38));    // flat grass, no checkerboard
+            Color ga = U.hex(0x4a7535), gb = U.hex(0x4f7c39);
+            for (int x = 0; x < C.GW; x++)
+                for (int y = 0; y < C.GH; y++)
+                    FillRect(x * C.CELL, y * C.CELL, C.CELL, C.CELL, (x + y) % 2 == 1 ? ga : gb);
+            for (int i = 0; i < 69; i++)
+            {
+                double bx = vhash(i, 1, 7) * C.VW, by = vhash(i, 2, 7) * C.VH, r = 26 + vhash(i, 3, 7) * 52;
+                E(bx, by, r, r * 0.7, vhash(i, 4, 7) < 0.55 ? Col(28, 58, 24, .16) : Col(140, 175, 80, .09));
+            }
+            for (int i = 0; i < 135; i++)
+            {
+                double x = vhash(i, 5, 9) * C.VW, y = vhash(i, 6, 9) * C.VH;
+                E(x, y, 1.6, 1.6, vhash(i, 7, 9) < 0.5 ? Col(235, 225, 150, .55) : Col(240, 240, 240, .45));
+            }
         }
 
         void DrawMud(OrchardGame g)
         {
-            Color rim = U.hex(0x3c2b18), body = U.hex(0x5b4327), inner = U.hex(0x4a3820);
+            Color rim = U.hex(0x3c2b18), body = U.hex(0x5b4327), inner = U.hex(0x4a3820), sheen = Col(170, 190, 215, .22);
             ForBlobs(g, C.MUD, (x, y, cx, cy, k) => E(x, y + 2, 25, 18, rim));
             ForBlobs(g, C.MUD, (x, y, cx, cy, k) => E(x, y, 23, 16, body));
             ForBlobs(g, C.MUD, (x, y, cx, cy, k) => E(x, y + 1, 17, 11, inner));
+            ForBlobs(g, C.MUD, (x, y, cx, cy, k) => { if (k == 1) E(x - 6, y - 4, 9, 3.5, sheen); });
+            for (int x = 0; x < C.GW; x++)
+                for (int y = 0; y < C.GH; y++)
+                    if (g.grid[x, y] == C.MUD)
+                    {
+                        Pos c = U.cc(x, y);
+                        for (int k = 0; k < 2; k++)
+                        {
+                            double per = 1.6 + vhash(x, y, k + 20) * 1.2;
+                            double ph = ((vt + vhash(x, y, k + 30) * per) % per) / per;
+                            double ox = (vhash(x, y, k + 40) - .5) * 20, oy = (vhash(x, y, k + 50) - .5) * 10;
+                            double rr = 2 + ph * 10;
+                            StrokeEllipse(c.x + ox, c.y + oy, rr, rr, 1, Col(190, 205, 225, 0.5 * (1 - ph)));
+                        }
                     }
+        }
 
         // fallen logs: a bark-brown trunk across two cells, cut rings at both ends, a leafy twig
         void DrawLogs(OrchardGame g)
         {
             if (g.logs == null) return;
-            Color dark = U.hex(0x4a3019), bark = U.hex(0x6e4a28), hi = U.hex(0x8c6438);
+            Color sh = Col(0, 0, 0, .28), dark = U.hex(0x4a3019), bark = U.hex(0x6e4a28), hi = U.hex(0x8c6438);
             Color ring = U.hex(0xd9b77e), ringIn = U.hex(0xb48a52), leaf = U.hex(0x5f8f3a), leaf2 = U.hex(0x7aa84a);
             foreach (FallenLog lg in g.logs)
             {
@@ -388,6 +466,7 @@ namespace Orchard
                 double tilt = (lg.seed - 0.5) * 8;                 // a little crooked, not ruler-straight
                 double ax = a.x + (lg.horiz ? -17 : tilt), ay = a.y + (lg.horiz ? tilt : -17);
                 double bx = b.x + (lg.horiz ? 17 : -tilt), by = b.y + (lg.horiz ? -tilt : 17);
+                Line(ax + 4, ay + 8, bx + 4, by + 8, 24, sh);       // shadow
                 Line(ax, ay + 2, bx, by + 2, 24, dark);              // underside
                 Line(ax, ay, bx, by, 20, bark);                      // trunk
                 Line(ax - (lg.horiz ? 0 : 5), ay - (lg.horiz ? 5 : 0), bx - (lg.horiz ? 0 : 5), by - (lg.horiz ? 5 : 0), 5, hi);                 // light on top
@@ -410,7 +489,8 @@ namespace Orchard
 
         void DrawHills(OrchardGame g)
         {
-            Color rim = U.hex(0x5a5246), body = U.hex(0x857b6a), top = U.hex(0x9b917d), hi = U.hex(0xb3a993), moss = Col(80, 120, 50, .75);
+            Color sh = Col(0, 0, 0, .30), rim = U.hex(0x5a5246), body = U.hex(0x857b6a), top = U.hex(0x9b917d), hi = U.hex(0xb3a993), moss = Col(80, 120, 50, .75);
+            ForBlobs(g, C.HILL, (x, y, cx, cy, k) => E(x + 3, y + 9, 27, 19, sh));
             ForBlobs(g, C.HILL, (x, y, cx, cy, k) => E(x, y + 3, 26, 20, rim));
             ForBlobs(g, C.HILL, (x, y, cx, cy, k) => E(x, y, 24, 18, body));
             ForBlobs(g, C.HILL, (x, y, cx, cy, k) => E(x - 3, y - 4, 18, 12, top));
@@ -434,10 +514,76 @@ namespace Orchard
 
         void DrawBush(double x, double y)
         {
+            Shadow(x, y + 6, 20);
             Color d = U.hex(0x244f21), m = U.hex(0x2b5f27), l1 = U.hex(0x3f8438), l2 = U.hex(0x3a7a33), l3 = U.hex(0x55a046), berry = U.hex(0xc83d3d);
             E(x - 9, y - 6, 12, 11, d); E(x + 9, y - 6, 12, 11, d); E(x, y - 14, 14, 13, m);
             E(x - 5, y - 12, 8, 7, l1); E(x + 6, y - 9, 6, 5, l2); E(x - 2, y - 19, 5, 4, l3);
             E(x - 8, y - 4, 2, 2, berry); E(x + 5, y - 15, 2, 2, berry); E(x + 10, y - 3, 2, 2, berry);
+        }
+
+        void InitFlies()
+        {
+            flies.Clear();
+            for (int i = 0; i < 24; i++)
+            {
+                Firefly f = new Firefly();
+                f.x = vr() * C.VW; f.y = vr() * C.VH; f.a = vr() * 6.28; f.p = vr() * 6.28; f.s = 10 + vr() * 14;
+                flies.Add(f);
+            }
+        }
+
+        // turns game events into particles by comparing with last frame (read only)
+        void Watch(OrchardGame g, double dt)
+        {
+            seenTmp.Clear();
+            foreach (Enemy e in g.enemies)
+            {
+                seenTmp.Add(e);
+                double h;
+                if (lastHp.TryGetValue(e, out h) && e.hp < h - 0.01 && vr() < 0.5) Emit(e.x, e.y - 16, 3, U.hex(0xfff3c4), 90, 0.3, 2.2, 20, 0);
+                lastHp[e] = e.hp;
+            }
+            goneTmp.Clear();
+            foreach (KeyValuePair<Enemy, double> kv in lastHp) if (!seenTmp.Contains(kv.Key)) goneTmp.Add(kv.Key);
+            foreach (Enemy e in goneTmp)
+            {
+                lastHp.Remove(e);
+                if (e.type == "scatterling") Emit(e.x, e.y - 26, 10, U.hex(0xf1d23a), 70, 0.7, 3, 30, 60);
+                else if (e.type == "bad") Emit(e.x, e.y - 26, 10, U.hex(0x2a2a30), 70, 0.7, 3, 30, 60);
+                else { Emit(e.x, e.y - 14, 12, Col(150, 140, 170), 60, 0.8, 6, 25, 0); Emit(e.x, e.y - 14, 6, U.hex(0xfff3c4), 110, 0.35, 2, 0, 0); }
+            }
+            foreach (Bait b in lastBaits)
+                if (!g.baits.Contains(b))
+                {
+                    if (g.fruitSaved > lastSaved) Emit(b.x, b.y, 9, U.hex(0xf6e27a), 60, 0.6, 2.5, 40, 0);
+                    else if (g.fruitLost > lastLost) Emit(b.x, b.y, 9, U.hex(0x3a3040), 60, 0.6, 2.5, 40, 0);
+                }
+            lastBaits.Clear(); lastBaits.AddRange(g.baits);
+            lastSaved = g.fruitSaved; lastLost = g.fruitLost;
+            foreach (TreeEntity t in g.trees)
+            {
+                if (t.revived > 1.9 && !reviveBurst.Contains(t))
+                {
+                    reviveBurst.Add(t);
+                    Emit(t.x, t.y - 40, 26, U.hex(0xffe08a), 120, 1.1, 3, 60, 40);
+                    Emit(t.x, t.y - 40, 14, U.hex(0x9cf08a), 90, 1.0, 2.5, 50, 30);
+                }
+                if (t.revived <= 0) reviveBurst.Remove(t);
+                if (t.alive && t.flash > 0 && vr() < dt * 6)
+                {
+                    Particle p = new Particle();
+                    p.x = t.x + (vr() - .5) * 50; p.y = t.y - 50 - vr() * 20; p.vx = (vr() - .5) * 20; p.vy = 20;
+                    p.life = 1.4; p.max = 1.4; p.size = 3; p.col = vr() < .5 ? U.hex(0xd9772b) : U.hex(0xb5442a); p.g = 10; p.leaf = true;
+                    parts.Add(p);
+                }
+                if (t.alive && t.healGlow > 0 && vr() < dt * 10)
+                {
+                    Particle p = new Particle();
+                    p.x = t.x + (vr() - .5) * 40; p.y = t.y - 20 - vr() * 30; p.vx = 0; p.vy = -30;
+                    p.life = 0.9; p.max = 0.9; p.size = 2.5; p.col = U.hex(0x9cf08a); p.g = 0;
+                    parts.Add(p);
+                }
+            }
         }
 
         public void Render(OrchardGame g, double dt)
@@ -445,19 +591,22 @@ namespace Orchard
             Begin();
             vt += dt;
             if (g.grid == null) { FillRect(0, 0, C.VW, C.VH, U.hex(0x4e7c3c)); End(); return; }
+            if (flies.Count == 0) InitFlies();
 
             DrawGround();
             DrawMud(g);
             foreach (Tuft t in g.tufts) DrawTuft(t.x, t.y);
-            Color bc = U.hex(0x5a3f24), bc2 = U.hex(0x6e4e2e);
+            Color bsh = Col(0, 0, 0, .25), bc = U.hex(0x5a3f24), bc2 = U.hex(0x6e4e2e);
             foreach (Branch br in g.branches)
             {
                 double dx = System.Math.Cos(br.a) * 10, dy = System.Math.Sin(br.a) * 10;
+                Line(br.x - dx + 1, br.y - dy + 2, br.x + dx + 1, br.y + dy + 2, 3, bsh);
                 Line(br.x - dx, br.y - dy, br.x + dx, br.y + dy, 3, bc);
                 Line(br.x, br.y, br.x + System.Math.Cos(br.a + 0.6) * 6, br.y + System.Math.Sin(br.a + 0.6) * 6, 2, bc2);
             }
             DrawHills(g);
             DrawLogs(g);
+            Watch(g, dt);
 
             // depth list
             items.Clear();
@@ -469,6 +618,7 @@ namespace Orchard
             foreach (TreeEntity t in g.trees) items.Add(MakeItem(t.y, seq++, 3, 0, 0, t, null));
             foreach (FlyingFruit f in g.flyingFruit) items.Add(MakeItem(f.y, seq++, 2, f.x, 18, null, null));
             foreach (Enemy e in g.enemies) items.Add(MakeItem(e.y, seq++, 4, 0, 0, e, null));
+            foreach (FallenBird fb in g.fallenBirds) items.Add(MakeItem(fb.y, seq++, 8, 0, 0, fb, null));
             items.Add(MakeItem(g.pip.y, seq++, 5, 0, 0, g.pip, "pip"));
             items.Add(MakeItem(g.thistle.y, seq++, 5, 0, 0, g.thistle, "thistle"));
             items.Add(MakeItem(g.farmer.y, seq++, 6, 0, 0, g.farmer, null));
@@ -481,6 +631,7 @@ namespace Orchard
                 Stalker st = e as Stalker;
                 if (st != null && st.sees)
                 {
+                    Soft(texGlow, red, 0.18, e.x, e.y, st.sight * 0.55, st.sight * 0.45);
                     foreach (Vector4 d in dashes) Line(e.x + d.x, e.y + d.y, e.x + d.z, e.y + d.w, 2, ring);
                 }
             }
@@ -525,24 +676,37 @@ namespace Orchard
                 }
             }
 
-            Color dark = Col(20, 16, 10, .75), track = Col(255, 255, 255, .12), shine = Col(255, 255, 255, .35);
+            Color shadowC = Col(0, 0, 0, .25), dark = Col(20, 16, 10, .75), track = Col(255, 255, 255, .12), shine = Col(255, 255, 255, .35);
             foreach (Item it in items)
             {
                 if (it.k == 1) DrawBush(it.x, it.y);
                 else if (it.k == 7)
                 {
+                    Soft(texGlow, Col(255, 214, 120), 0.35 + 0.2 * System.Math.Sin(vt * 4 + it.x), it.x, it.y, 18, 12);
+                    E(it.x, it.y + 8, 7, 3, shadowC);
                     Spr("apple", it.x, it.y, it.h, false, false);
                 }
                 else if (it.k == 2)
                 {
+                    E(it.x, it.y + 14, 6, 2.5, Col(0, 0, 0, .18));
                     Spr("apple", it.x, it.y, it.h, false, false);
                 }
                 else if (it.k == 3)
                 {
                     TreeEntity t = (TreeEntity)it.refObj;
+                    E(t.x + 4, t.y + 9, 32, 11, Col(0, 0, 0, .26));
                     if (t.alive)
                     {
+                        if (t.revived > 0)
+                        {
+                            // brought back by the scatterlings: golden bloom + expanding ring
+                            double u = 1 - t.revived / 2.0;
+                            Soft(texGlow, Col(255, 220, 120), 0.75 * (1 - u), t.x, t.y - 38, 70 + 40 * u, 70 + 40 * u);
+                            StrokeEllipse(t.x, t.y + 4, 20 + 70 * u, (20 + 70 * u) * 0.45, 3, Col(255, 230, 140, 0.8 * (1 - u)));
+                        }
+                        if (t.healGlow > 0) Soft(texGlow, Col(120, 240, 120), 0.55, t.x, t.y - 38, 52, 52);
                         Spr("tree", t.x, t.y + 12, 96, false, true);
+                        if (t.flash > 0) Soft(texGlow, Col(255, 90, 60), 0.45, t.x, t.y - 38, 48, 48);
                         double f = t.hp / t.maxhp, w = 46, hx = t.x - w / 2, hy = t.y - 92;
                         Pill(hx - 1.5, hy - 1.5, w + 3, 9, dark);
                         Pill(hx, hy, w, 6, track);
@@ -562,22 +726,19 @@ namespace Orchard
                     Bird bird = e as Bird;
                     if (bird != null)
                     {
+                        E(e.x, e.y, 11, 4.5, Col(0, 0, 0, .2));
                         double bob = System.Math.Sin(bird.bob) * 3;
+                        if (!bird.bad) Soft(texGlow, Col(255, 230, 120), 0.22, e.x, e.y - bird.flyH + bob - 12, 22, 22);
                         Spr(bird.bad ? "badscatter" : "scatterling", e.x, e.y - bird.flyH + bob, 28, e.dir < 0, true);
                         if (bird.bad) E(e.x + (e.dir < 0 ? -5 : 5), e.y - bird.flyH + bob - 17, 2.2, 2.2, Col(255, 60, 50, .9));
-                        if (bird.confT > 0 || bird.noEatT > 0)
-                        {
-                            double nx = e.x + 13, ny = e.y - bird.flyH + bob - 28;   // tiny crossed-out apple
-                            E(nx, ny, 4, 4, Col(20, 16, 10, .6));
-                            E(nx, ny + 0.4, 2.6, 2.4, Col(230, 90, 70, .85));
-                            Line(nx - 3.4, ny + 3.4, nx + 3.4, ny - 3.4, 1.3, Col(255, 255, 255, .9));
-                        }
                     }
                     else
                     {
                         double bob = System.Math.Abs(System.Math.Sin(e.walk)) * (e.type == "shambler" ? 4 : 3);
+                        Shadow(e.x, e.y, 14);
                         double h = e.type == "stalker" ? 34 : 44;
                         Stalker st = e as Stalker;
+                        if (st != null) Soft(texGlow, Col(255, 50, 40), st.sees ? 0.55 : 0.25, e.x + (e.dir < 0 ? -8 : 8), e.y - 20, 12, 10);
                         Spr(e.type, e.x, e.y + 5 - bob, h, e.dir < 0, true);
                         if (e.hp < 6)
                         {
@@ -596,14 +757,47 @@ namespace Orchard
                         }
                     }
                 }
+                else if (it.k == 8)
+                {
+                    FallenBird fb = (FallenBird)it.refObj;
+                    Sprite ys;
+                    if (img.TryGetValue("scatterling", out ys))
+                    {
+                        double hh = 26, ww = hh * ys.rect.width / ys.rect.height;
+                        double k = 1 - System.Math.Min(1, fb.h / 40);
+                        E(fb.x, fb.y + 2, 6 + 6 * k, (6 + 6 * k) * 0.42, Col(0, 0, 0, 0.12 + 0.12 * k));
+                        if (fb.landed)
+                        {
+                            // little feathers around it on the grass
+                            E(fb.x - 13, fb.y + 3, 3.2, 1.6, Col(241, 210, 58, .9));
+                            E(fb.x + 12, fb.y + 1, 2.8, 1.4, Col(241, 210, 58, .8));
+                            E(fb.x + 4, fb.y + 7, 2.4, 1.2, Col(230, 190, 40, .8));
+                            Soft(texGlow, Col(255, 220, 110), 0.28, fb.x, fb.y - 6, 26, 18);
+                            DrawImageRot(ys, fb.x, fb.y - 8, ww, hh * 0.92, fb.rot, fb.dir < 0, 0.95);
+                            // cartoon "dizzy" stars circling above it
+                            for (int si = 0; si < 3; si++)
+                            {
+                                double ang = vt * 3 + si * 2.094;
+                                double sx2 = fb.x + System.Math.Cos(ang) * 11, sy2 = fb.y - 24 + System.Math.Sin(ang) * 4;
+                                double sz = 2.2 + 0.6 * System.Math.Sin(ang);
+                                Color sc2 = Col(255, 236, 140, 0.95);
+                                FillRect(sx2 - sz, sy2 - 0.6, sz * 2, 1.2, sc2);
+                                FillRect(sx2 - 0.6, sy2 - sz, 1.2, sz * 2, sc2);
+                            }
+                        }
+                        else DrawImageRot(ys, fb.x, fb.y - fb.h - 13, ww, hh, fb.rot, fb.dir < 0, 1);
+                    }
+                }
                 else if (it.k == 5)
                 {
                     Mover m = (Mover)it.refObj;
                     int dir = (m is Pip) ? ((Pip)m).dir : ((Thistle)m).dir;
+                    Shadow(m.x, m.y, 12);
                     Spr(it.imgName, m.x, m.y + 4, 34, dir < 0, true);
                     Pip pp = m as Pip;
                     double dhp = pp != null ? pp.hp : ((Thistle)m).hp;
                     double flash = pp != null ? pp.hurtFlash : ((Thistle)m).hurtFlash;
+                    if (flash > 0) Soft(texGlow, Col(255, 70, 50), 0.6, m.x, m.y - 14, 22, 18);
                     if (dhp < 4.99)
                     {
                         double w = 24;
@@ -629,42 +823,79 @@ namespace Orchard
                 else if (it.k == 6)
                 {
                     Farmer f = (Farmer)it.refObj;
+                    Shadow(f.x, f.y, 14);
                     double bob = f.moving ? System.Math.Abs(System.Math.Sin(f.walk)) * 3 : 0;
                     Spr("farmer", f.x, f.y + 5 - bob, 46, f.dir < 0, true);
-                    DrawStick(f, bob);
-                    if (f.hp < C.FARMER_HP - 0.01)
+                    DrawScythe(f);
+                    if (f.stun > 0)
                     {
-                        double w = 30, fr = f.hp / C.FARMER_HP, hy = f.y - 58;
-                        Pill(f.x - w / 2 - 1, hy - 1, w + 2, 6, Col(20, 16, 10, .8));
-                        Pill(f.x - w / 2, hy, System.Math.Max(4, w * fr), 4, HpCol(fr));
+                        for (int si = 0; si < 3; si++)
+                        {
+                            double ang = vt * 4 + si * 2.094;
+                            double sx2 = f.x + System.Math.Cos(ang) * 12, sy2 = f.y - 46 + System.Math.Sin(ang) * 4;
+                            Color sc2 = Col(255, 236, 140, 0.95);
+                            FillRect(sx2 - 2.6, sy2 - 0.6, 5.2, 1.2, sc2);
+                            FillRect(sx2 - 0.6, sy2 - 2.6, 1.2, 5.2, sc2);
+                        }
                     }
                 }
             }
 
-            foreach (Tornado t in g.tornados) DrawTornado(t);
+            // particles
+            for (int i = parts.Count - 1; i >= 0; i--)
+            {
+                Particle p = parts[i];
+                p.life -= dt;
+                if (p.life <= 0) { parts.RemoveAt(i); continue; }
+                p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+                if (p.leaf) p.x += System.Math.Sin(vt * 4 + p.y * 0.1) * 0.6;
+                double ga = System.Math.Min(1, p.life / p.max * 1.5);
+                E(p.x, p.y, p.size * (p.leaf ? 1.3 : 1), p.size * (p.leaf ? 0.8 : 1), WithA(p.col, ga));
+            }
+
+            // drifting ground fog
+            Color fogC = Col(200, 215, 235);
+            for (int i = 0; i < 10; i++)
+            {
+                double fx = (vhash(i, 11, 3) * (C.VW + 320) + vt * (5 + vhash(i, 12, 3) * 6)) % (C.VW + 320) - 160;
+                double fy = vhash(i, 13, 3) * C.VH;
+                Soft(texGlow, fogC, 0.07, fx, fy, 170, 80);
+            }
+
+            // night lighting: darkness with a lantern hole around the farmer, vignette, warm glows
+            double lx = g.farmer.x, ly = g.farmer.y - 18;
+            Soft(texDark, Col(10, 14, 38), 0.55, lx, ly, 1450, 1450);   // big enough to cover the far corner
+            Soft(texVign, Col(5, 6, 16), 1, C.VW / 2.0, C.VH / 2.0, C.VW * 0.72, C.VH * 0.8);
+            Soft(texGlow, Col(255, 196, 120), 0.16, lx, ly, 130, 130);
+            foreach (TreeEntity t in g.trees) if (t.alive) Soft(texGlow, Col(255, 190, 120), 0.06, t.x, t.y - 40, 70, 70);
+
+            // fireflies
+            Color ffG = Col(220, 255, 140);
+            foreach (Firefly f in flies)
+            {
+                f.a += (vr() - .5) * dt * 2;
+                f.x += System.Math.Cos(f.a) * f.s * dt; f.y += System.Math.Sin(f.a) * f.s * dt;
+                if (f.x < 0) f.x += C.VW; if (f.x > C.VW) f.x -= C.VW;
+                if (f.y < 0) f.y += C.VH; if (f.y > C.VH) f.y -= C.VH;
+                double k = 0.5 + 0.5 * System.Math.Sin(vt * 2.2 + f.p);
+                Soft(texGlow, ffG, 0.5 * k, f.x, f.y, 9, 9);
+                E(f.x, f.y, 1.3, 1.3, Col(240, 255, 190, 0.4 + 0.6 * k));
+            }
+
+            if (g.running && !g.gameOver)
+            {
+                DrawRain(g, dt);
+                boltNext -= dt;
+                if (boltNext <= 0) { bolt = 0.45; boltNext = 14 + vr() * 16; }
+                if (bolt > 0)
+                {
+                    bolt -= dt;
+                    double a = bolt > 0.3 ? 0.35 : (bolt > 0.2 ? 0.05 : (bolt > 0.1 ? 0.22 : System.Math.Max(0, bolt) * 1.5));
+                    FillRect(0, 0, C.VW, C.VH, Col(220, 230, 255, a));
+                }
+            }
 
             End();
-        }
-
-        // the farmer's stick: held up, it swings down and back up each time he hits (space)
-        void DrawStick(Farmer f, double bob)
-        {
-            double p = f.swing > 0 ? U.clamp(1 - f.swing / 0.32, 0, 1) : 0;
-            double a = -1.15 + 1.95 * System.Math.Sin(System.Math.PI * p);    // -1.15 raised ... +0.8 down
-            double d = f.dir < 0 ? -1 : 1, L = 34;
-            double hx = f.x + d * 9, hy = f.y - 17 - bob;
-            double tx = hx + d * System.Math.Cos(a) * L, ty = hy + System.Math.Sin(a) * L;
-            Line(hx, hy, tx, ty, 4, U.hex(0x8a5a2b));
-            E(tx, ty, 4.5, 4.5, U.hex(0xe6eae2));
-        }
-
-        // tornado: just a plain ring showing its reach on the ground (the confusion zone) and a small core
-        void DrawTornado(Tornado t)
-        {
-            double life = t.life, age = C.TORNADO_LIFE - life;
-            double fade = System.Math.Min(1, System.Math.Min(age / 0.5, life / 0.8));
-            StrokeEllipse(t.x, t.y, t.r * 0.95, t.r * 0.95 * 0.42, 2, Col(230, 215, 180, 0.7 * fade));
-            E(t.x, t.y, 9, 4, Col(170, 150, 115, 0.9 * fade));
         }
 
         // ---- shambler decision display ----
@@ -673,8 +904,7 @@ namespace Orchard
             new Color(1f, 0x9f / 255f, 0x43 / 255f, 1),            // EatFruit  orange
             new Color(0xe9 / 255f, 0xb8 / 255f, 0x50 / 255f, 1),   // PackDog   amber
             new Color(0xf0 / 255f, 0x6a / 255f, 0x55 / 255f, 1),   // HitFarmer red
-            new Color(0x7f / 255f, 0xb4 / 255f, 0xe6 / 255f, 1),   // Flee      blue
-            new Color(0xd8 / 255f, 0xc8 / 255f, 0xa8 / 255f, 1) }; // Whirl     dust
+            new Color(0x7f / 255f, 0xb4 / 255f, 0xe6 / 255f, 1) }; // Flee      blue
 
         // a small speech bubble over the shambler showing what it decided, plus (Tab) its desirability bars
         void DrawIntent(Shambler s, double x, double y, bool bars)
@@ -706,24 +936,16 @@ namespace Orchard
                 FillRect(x - 1.2, y - 5, 2.4, 6.2, c);
                 E(x, y + 3.6, 1.4, 1.4, c);
             }
-            else if (s.act == ShamAct.Whirl)
-            {
-                double a0 = -vt * 7;                              // little spinning swirl
-                Arc(x, y, 4.6, a0, a0 + 4.2, 1.6, c);
-                Arc(x, y, 2.2, a0 + 1.5, a0 + 5.2, 1.4, c);
-            }
             else
             {
                 E(x, y + 1, 3.2, 3.6, c);                        // sweat drop
                 E(x, y - 2.4, 1.6, 2.2, c);
             }
             if (!bars) return;
-            // six bars = how much it wants each option right now (chosen one outlined)
-            int na = Shambler.N_ACT;
-            double bw = 4.2, gap = 1.3, bh = 22;
-            double bx = x - (na * bw + (na - 1) * gap) / 2, by = y - 13;
-            FillRect(bx - 2, by - bh - 2, na * bw + (na - 1) * gap + 4, bh + 4, Col(20, 16, 10, .78));
-            for (int i = 0; i < na; i++)
+            // five bars = how much it wants each option right now (chosen one outlined)
+            double bx = x - 13, by = y - 13, bw = 4.2, gap = 1.3, bh = 22;
+            FillRect(bx - 2, by - bh - 2, 5 * bw + 4 * gap + 4, bh + 4, Col(20, 16, 10, .78));
+            for (int i = 0; i < 5; i++)
             {
                 double v = System.Math.Max(0.02, System.Math.Min(1, s.scores[i]));
                 double cx = bx + i * (bw + gap);
@@ -740,6 +962,53 @@ namespace Orchard
             return it;
         }
 
+        void DrawScythe(Farmer f)
+        {
+            if (f.swing <= 0) return;
+            double dur = 0.32;
+            double p = U.clamp(1 - f.swing / dur, 0, 1);
+            double bas = System.Math.Atan2(f.faceY, f.faceX);
+            double cx = f.x, cy = f.y - 15, R = C.SCYTHE_RANGE * 0.72; // ~3/4 of the old arc
+            // soft swoosh trail behind the blade
+            double aNow = bas - 0.9 + 1.8 * p;
+            for (int j = 0; j < 5; j++)
+                Arc(cx, cy, R - 2 - j * 2.5, bas - 0.9, aNow, 2.5, U.rgba(235, 240, 230, 0.10 - j * 0.015));
+            for (int g = 0; g < 3; g++)
+            {
+                double pp = U.clamp(p - g * 0.12, 0, 1);
+                double a2 = bas - 0.9 + 1.8 * pp;
+                Color col = g == 0 ? U.rgba(238, 240, 232, .95) : U.rgba(220, 225, 215, 0.28 - g * 0.11);
+                Arc(cx, cy, R, a2 - 0.45, a2 + 0.08, g == 0 ? 5 : 3, col);
+            }
+            double a = bas - 0.9 + 1.8 * p;
+            Soft(texGlow, U.hex(0xffffff), 0.55, cx + System.Math.Cos(a) * R, cy + System.Math.Sin(a) * R, 11, 11);
+            FillEllipse(cx + System.Math.Cos(a) * R, cy + System.Math.Sin(a) * R, 4, 4, U.hex(0xcfd4cc));
+        }
+
+        void DrawRain(OrchardGame g, double dt)
+        {
+            Color c = U.rgba(190, 212, 240, .42f);
+            foreach (RainDrop r in g.rain)
+            {
+                r.y += r.s * dt;
+                r.x += r.s * 0.22 * dt;
+                if (r.y > C.VH) { r.y = -10; r.x = U.R() * C.VW; }
+                Line(r.x, r.y, r.x - 2.5, r.y - r.l, 1, c);
+            }
+            for (int i = 0; i < 6; i++)
+                if (vr() < dt * 30)
+                {
+                    Particle p = new Particle();
+                    p.x = vr() * C.VW; p.y = vr() * C.VH; p.life = 0.25; p.max = 0.25; p.size = 1; p.col = Col(200, 220, 245, .7); p.splash = true;
+                    parts.Add(p);
+                }
+            foreach (Particle p in parts)
+                if (p.splash)
+                {
+                    double u = 1 - p.life / p.max;
+                    StrokeEllipse(p.x, p.y, 1 + u * 5, 0.5 + u * 2, 1, Col(200, 220, 245, 0.6 * (1 - u)));
+                }
+        }
     }
 
     // procedural textures for the canvas shapes

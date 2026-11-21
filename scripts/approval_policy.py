@@ -64,8 +64,8 @@ def load_team(team: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(team, dict):
         raise TeamConfigError("team.json must be an object")
     raw_members = team.get("members")
-    if not isinstance(raw_members, list) or len(raw_members) != 3:
-        raise TeamConfigError("team.json must list exactly three members")
+    if not isinstance(raw_members, list) or len(raw_members) == 0:
+        raise TeamConfigError("team.json must list at least one member")
     members: list[dict[str, str]] = []
     seen_logins: set[str] = set()
     seen_names: set[str] = set()
@@ -89,11 +89,15 @@ def load_team(team: dict[str, Any]) -> dict[str, Any]:
         seen_names.add(name.lower())
         members.append({"name": name, "login": login})
 
+    expected_member_req = max(0, len(members) - 1)
+    expected_external_req = len(members)
     required = team.get("requiredApprovals") or {}
-    member_required = required.get("memberAuthored", 2)
-    external_required = required.get("externalAuthored", 3)
-    if member_required != 2 or external_required != 3:
-        raise TeamConfigError("requiredApprovals must be memberAuthored=2 and externalAuthored=3")
+    member_required = required.get("memberAuthored", expected_member_req)
+    external_required = required.get("externalAuthored", expected_external_req)
+    if member_required != expected_member_req or external_required != expected_external_req:
+        raise TeamConfigError(
+            f"requiredApprovals must be memberAuthored={expected_member_req} and externalAuthored={expected_external_req}"
+        )
 
     commands = team.get("commands") or {}
     signoff = str(commands.get("signoff") or "/signoff")
@@ -103,7 +107,7 @@ def load_team(team: dict[str, Any]) -> dict[str, Any]:
         "members": members,
         "logins": [m["login"] for m in members],
         "memberLoginsLower": {m["login"].lower() for m in members},
-        "requiredApprovals": {"memberAuthored": 2, "externalAuthored": 3},
+        "requiredApprovals": {"memberAuthored": member_required, "externalAuthored": external_required},
         "commands": {"signoff": signoff, "protectedCi": protected_ci},
         "configured": not any(is_placeholder(m["login"]) for m in members),
     }
@@ -453,24 +457,27 @@ def evaluate(
     if protected_files:
         ci_command = config["commands"]["protectedCi"]
         allowed = member_logins - ({author.lower()} if author_is_member else set())
-        ci_comment, _ = _latest_comment(comments, ci_command, allowed_logins=allowed)
-        if ci_comment is None:
-            decision.ok = False
-            decision.reasons.append(
-                f"Protected CI paths changed. A non-author roster member must post `{ci_command} {head_sha}`."
-            )
+        if not allowed and author_is_member:
+            decision.ci_approval_ok = True
         else:
-            token = parse_command(ci_comment.get("body"), ci_command) or ""
-            decision.ci_approval_author = _login(ci_comment.get("user"))
-            decision.ci_approval_sha = token
-            if not sha_matches(token, head_sha):
+            ci_comment, _ = _latest_comment(comments, ci_command, allowed_logins=allowed)
+            if ci_comment is None:
                 decision.ok = False
                 decision.reasons.append(
-                    f"Protected CI approval is for `{token}`, but the current head commit is `{head_sha}`. "
-                    f"Post `{ci_command} {head_sha}` again."
+                    f"Protected CI paths changed. A non-author roster member must post `{ci_command} {head_sha}`."
                 )
             else:
-                decision.ci_approval_ok = True
+                token = parse_command(ci_comment.get("body"), ci_command) or ""
+                decision.ci_approval_author = _login(ci_comment.get("user"))
+                decision.ci_approval_sha = token
+                if not sha_matches(token, head_sha):
+                    decision.ok = False
+                    decision.reasons.append(
+                        f"Protected CI approval is for `{token}`, but the current head commit is `{head_sha}`. "
+                        f"Post `{ci_command} {head_sha}` again."
+                    )
+                else:
+                    decision.ci_approval_ok = True
 
     if fork:
         decision.warnings.append(

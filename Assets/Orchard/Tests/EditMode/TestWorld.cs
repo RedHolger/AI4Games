@@ -35,7 +35,7 @@ namespace Orchard.Tests
             game.enemies = new List<Enemy>();
             game.baits = new List<Bait>();
             game.flyingFruit = new List<FlyingFruit>();
-            game.tornados = new List<Tornado>();
+            game.fallenBirds = new List<FallenBird>();
             game.logs = new List<FallenLog>();
             game.branches = new List<Branch>();
             game.tufts = new List<Tuft>();

@@ -47,7 +47,7 @@ namespace Orchard.Tests
             Assert.IsNotNull(game.thistle);
             Assert.AreEqual(0, game.baits.Count);
             Assert.AreEqual(0, game.flyingFruit.Count);
-            Assert.AreEqual(0, game.tornados.Count);
+            Assert.AreEqual(0, game.fallenBirds.Count);
         }
 
         [Test]
@@ -69,10 +69,9 @@ namespace Orchard.Tests
             TreeEntity tree = game.trees[0];
             tree.hp = 5;
             tree.fruit = 1;
-            game.farmer.hp = 1;
             game.baits.Add(new Bait(10, 10));
             game.flyingFruit.Add(new FlyingFruit());
-            game.tornados.Add(new Tornado(20, 20));
+            game.fallenBirds.Add(new FallenBird());
             game.night = 1;
 
             world.Call("StartNight");
@@ -80,10 +79,9 @@ namespace Orchard.Tests
             Assert.AreEqual(C.TREE_HP, tree.hp, 1e-12);
             Assert.AreEqual(4, tree.fruit);
             Assert.IsTrue(double.IsPositiveInfinity(tree.firstHit));
-            Assert.AreEqual(C.FARMER_HP, game.farmer.hp, 1e-12);
             Assert.AreEqual(0, game.baits.Count);
             Assert.AreEqual(0, game.flyingFruit.Count);
-            Assert.AreEqual(0, game.tornados.Count);
+            Assert.AreEqual(0, game.fallenBirds.Count);
         }
 
         [Test]
@@ -194,8 +192,7 @@ namespace Orchard.Tests
             game.fruitLost = 2;
             game.fruitFallen = 3;
             game.birdSaved = 1;
-            game.tornadoCount = 2;
-            game.birdsConfused = 4;
+            game.revives = 2;
             game.gameOver = true;
             game.staticBuilt = false;
 
@@ -206,8 +203,7 @@ namespace Orchard.Tests
             Assert.AreEqual(0, game.fruitLost);
             Assert.AreEqual(0, game.fruitFallen);
             Assert.AreEqual(0, game.birdSaved);
-            Assert.AreEqual(0, game.tornadoCount);
-            Assert.AreEqual(0, game.birdsConfused);
+            Assert.AreEqual(0, game.revives);
             Assert.IsFalse(game.gameOver);
             Assert.IsTrue(game.running);
             Assert.IsTrue(game.staticBuilt);
@@ -346,28 +342,19 @@ namespace Orchard.Tests
         }
 
         [Test]
-        public void DizzyScatterling_CannotEatBait()
+        public void AllTreesDead_EndsTheRun()
         {
-            Bird bird = world.AddBird(300, 300, false);
-            bird.noEatT = C.NO_EAT_T;
-            world.AddBait(300, 300);
+            game.running = true;
+            game.gameOver = false;
+            foreach (TreeEntity t in game.trees) t.alive = false;
 
-            bird.update(0.01);
-
-            Assert.AreEqual(1, game.baits.Count, "a tornado victim may not eat for ten seconds");
-            Assert.AreEqual(0, game.fruitSaved);
-        }
-
-        [Test]
-        public void FarmerDown_EndsTheRun()
-        {
-            game.FarmerDown();
+            world.Call("UpdateGame", 0.05);
 
             Assert.IsFalse(game.running);
             Assert.IsTrue(game.gameOver);
         }
 
-        // ---------------- pack rule and stalkers ----------------
+        // ---------------- pack rule and farmer stun ----------------
 
         [Test]
         public void PackBites_NeedsTwoCommittedShamblers_ToHurtADog()
@@ -390,54 +377,56 @@ namespace Orchard.Tests
         }
 
         [Test]
-        public void Stalker_BitesTheFarmer_ThenWaitsForItsCooldown()
+        public void Farmer_KnockBack_StunsFarmerAndPushesAway()
         {
-            game.farmer.invuln = 0;
-            Stalker stalker = world.AddStalker(game.farmer.x - 20, game.farmer.y);
+            game.farmer.stun = 0;
+            game.farmer.KnockBack(new Pos(game.farmer.x - 20, game.farmer.y), 150, 0.4);
 
-            stalker.update(0.01);
-            Assert.AreEqual(C.FARMER_HP - C.STALKER_DMG, game.farmer.hp, 1e-9);
-            double afterFirstBite = game.farmer.hp;
+            Assert.Greater(game.farmer.stun, 0);
+            Assert.Greater(game.farmer.kbx, 0);
 
-            stalker.update(0.01);
-            Assert.AreEqual(afterFirstBite, game.farmer.hp, 1e-9, "1.6 s bite cooldown");
+            game.farmer.update(0.5);
+            Assert.LessOrEqual(game.farmer.stun, 0);
         }
 
         [Test]
-        public void Farmer_InvulnerabilityWindow_RejectsASecondHit()
+        public void Tree_Revive_BringsOldestFallenTreeBack_WhenBankReachesReviveCost()
         {
-            game.farmer.invuln = 0;
+            TreeEntity tree1 = world.AddTree(5, 5);
+            tree1.alive = false; tree1.diedAt = 10;
+            TreeEntity tree2 = world.AddTree(8, 8);
+            tree2.alive = false; tree2.diedAt = 25;
 
-            Assert.IsTrue(game.farmer.Hurt(1));
-            Assert.IsFalse(game.farmer.Hurt(1));
-            Assert.AreEqual(C.FARMER_HP - 1, game.farmer.hp, 1e-9);
+            game.birdSaved = C.REVIVE_COST;
+            Assert.AreEqual(C.REVIVE_COST, game.ReviveBank);
+
+            game.CheckRevive();
+
+            Assert.IsTrue(tree1.alive, "oldest fallen tree revived");
+            Assert.IsFalse(tree2.alive, "second dead tree remains dead");
+            Assert.AreEqual(1, game.revives);
+            Assert.AreEqual(0, game.ReviveBank);
+            Assert.AreEqual(tree1.maxhp, tree1.hp, 1e-9);
+            Assert.AreEqual(4, tree1.fruit);
         }
 
         [Test]
-        public void Stalker_BiteCanDownTheFarmer()
+        public void Tree_Revive_RevivesMultipleTrees_WithSufficientBank()
         {
-            game.farmer.hp = 1;
-            game.farmer.invuln = 0;
-            world.AddStalker(game.farmer.x - 20, game.farmer.y);
+            TreeEntity tree1 = world.AddTree(5, 5);
+            tree1.alive = false; tree1.diedAt = 5;
+            TreeEntity tree2 = world.AddTree(8, 8);
+            tree2.alive = false; tree2.diedAt = 15;
 
-            game.enemies[0].update(0.01);
+            game.birdSaved = C.REVIVE_COST * 2;
+            game.CheckRevive();
 
-            Assert.IsFalse(game.running);
-            Assert.IsTrue(game.gameOver);
+            Assert.IsTrue(tree1.alive);
+            Assert.IsTrue(tree2.alive);
+            Assert.AreEqual(2, game.revives);
         }
 
-        [Test]
-        public void Farmer_HealthClampsAtZero()
-        {
-            game.farmer.hp = 0.5;
-            game.farmer.invuln = 0;
-
-            game.farmer.Hurt(10);
-
-            Assert.AreEqual(0.0, game.farmer.hp, 1e-12);
-        }
-
-        // ---------------- trees and tornadoes ----------------
+        // ---------------- trees and birds ----------------
 
         [Test]
         public void Tree_GnawDestroysIt_AndHealClampsAtMax()
@@ -467,32 +456,29 @@ namespace Orchard.Tests
         }
 
         [Test]
-        public void Tornado_ConfusesAScatterlingOnce_AndBlocksEating()
+        public void FallenBird_TumblesAndLandsOnGround()
         {
-            Bird bird = world.AddBird(300, 300, false);
-            world.AddBait(300, 300);
-            game.tornados.Add(new Tornado(300, 300));
+            FallenBird fb = new FallenBird { h = 50, vh = 0, spin = 2, landed = false };
+            game.fallenBirds.Add(fb);
 
-            world.Call("UpdateTornados", 0.1);
-            Assert.AreEqual(C.CONFUSE_T, bird.confT, 1e-9);
-            Assert.AreEqual(C.NO_EAT_T, bird.noEatT, 1e-9);
-            Assert.AreEqual(1, game.birdsConfused);
+            world.Call("UpdateGame", 1.0);
 
-            world.Call("UpdateTornados", 0.1);
-            Assert.AreEqual(1, game.birdsConfused, "a bird is only caught once per tornado");
-
-            bird.update(0.1);
-            Assert.AreEqual(1, game.baits.Count, "confused birds cannot eat");
+            Assert.IsTrue(fb.landed);
+            Assert.AreEqual(0.0, fb.h, 1e-9);
+            Assert.AreEqual(System.Math.PI, fb.rot, 1e-9);
         }
 
         [Test]
-        public void Tornado_ExpiresAfterItsLifetime()
+        public void BirdCaught_SpawnsFallenBird_AndBadBirdRests()
         {
-            game.tornados.Add(new Tornado(300, 300));
+            Bird bad = world.AddBird(300, 300, true);
+            Bird good = world.AddBird(300, 300, false);
 
-            world.Call("UpdateTornados", C.TORNADO_LIFE + 0.1);
+            bad.update(0.01);
 
-            Assert.AreEqual(0, game.tornados.Count);
+            Assert.IsTrue(good.dead);
+            Assert.AreEqual(1, game.fallenBirds.Count);
+            Assert.AreEqual(C.KILL_COOLDOWN, bad.killCd, 1e-9);
         }
 
         // ---------------- spawns and logging ----------------

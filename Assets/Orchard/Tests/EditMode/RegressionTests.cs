@@ -89,8 +89,8 @@ namespace Orchard.Tests
             sb.Append("nightTime=").Append(g.nightTime.ToString("R"));
             sb.Append("|night=").Append(g.night);
             sb.Append("|fruit=").Append(g.fruitSaved).Append("/").Append(g.fruitLost).Append("/").Append(g.fruitFallen);
-            sb.Append("|tornados=").Append(g.tornadoCount).Append("/").Append(g.birdsConfused);
-            sb.Append("|farmer=").Append(Pos(g.farmer)).Append(":").Append(g.farmer.hp.ToString("R"));
+            sb.Append("|revives=").Append(g.revives).Append("/").Append(g.birdSaved);
+            sb.Append("|farmer=").Append(Pos(g.farmer)).Append(":").Append(g.farmer.stun.ToString("R"));
             sb.Append("|pip=").Append(Pos(g.pip)).Append(":").Append(g.pip.hp.ToString("R")).Append(":").Append(g.pip.retreating);
             sb.Append("|thistle=").Append(Pos(g.thistle)).Append(":").Append(g.thistle.hp.ToString("R")).Append(":").Append(g.thistle.state);
             sb.Append("|trees=");

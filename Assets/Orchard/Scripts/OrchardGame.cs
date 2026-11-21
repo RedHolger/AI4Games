@@ -26,20 +26,19 @@ namespace Orchard
         public List<Tuft> tufts = new List<Tuft>();
         public List<Branch> branches = new List<Branch>();
         public List<FallenLog> logs = new List<FallenLog>();
+        public List<RainDrop> rain = new List<RainDrop>();
         public List<TreeEntity> trees = new List<TreeEntity>();
         public List<Enemy> enemies = new List<Enemy>();
         public List<Bait> baits = new List<Bait>();
         public List<FlyingFruit> flyingFruit = new List<FlyingFruit>();
-        public List<Tornado> tornados = new List<Tornado>();
-        public int tornadoCount = 0, birdsConfused = 0;
-        public double lastTornadoAt = -99;
         public Farmer farmer;
         public Pip pip;
         public Thistle thistle;
         public int night = 1;
         public double nightTime = 0;
         public int fruitSaved = 0, fruitLost = 0, fruitFallen = 0;
-        public int birdSaved = 0;          // fruit saved by scatterlings
+        public int birdSaved = 0, revives = 0;          // fruit saved by scatterlings, trees brought back
+        public List<FallenBird> fallenBirds = new List<FallenBird>();
         public bool running = false, gameOver = false;
         public List<SpawnEvent> spawnQueue = new List<SpawnEvent>();
         public Phase phase = Phase.Play;
@@ -63,6 +62,7 @@ namespace Orchard
             img = SpriteLoader.LoadAll();
             rend = new GameRenderer(img);
             ui = new OrchardUI(this, rend.rt);
+            InitRain();
             Boot();
         }
 
@@ -145,7 +145,6 @@ namespace Orchard
             for (int i = 0; i < enemies.Count; i++) enemies[i].update(dt);
             PackBites(pip, dt);
             PackBites(thistle, dt);
-            UpdateTornados(dt);
             for (int i = enemies.Count - 1; i >= 0; i--) if (enemies[i].dead) enemies.RemoveAt(i);
             for (int i = flyingFruit.Count - 1; i >= 0; i--)
             {
@@ -160,9 +159,19 @@ namespace Orchard
                     LogEvent("Fruit dropped, now bait");
                 }
             }
+            foreach (FallenBird fb in fallenBirds)
+            {
+                fb.t += dt;
+                if (fb.landed) continue;
+                fb.vh += 520 * dt;
+                fb.h -= fb.vh * dt;
+                fb.rot += fb.spin * dt;
+                if (fb.h <= 0) { fb.h = 0; fb.landed = true; fb.rot = System.Math.PI; }   // lands on its back
+            }
             foreach (TreeEntity t in trees)
             {
                 if (t.flash > 0) t.flash -= dt;
+                if (t.revived > 0) t.revived -= dt;
                 if (t.healGlow > 0) t.healGlow -= dt;
             }
             bool allDead = true;
@@ -228,7 +237,7 @@ namespace Orchard
 
         public void TrySwing()
         {
-            if (!running) return;
+            if (!running || farmer.stun > 0) return;
             farmer.swing = 0.32;
             foreach (Enemy e in enemies)
             {
@@ -258,11 +267,8 @@ namespace Orchard
         void StartNight()
         {
             nightTime = 0;
-            farmer.hp = C.FARMER_HP; farmer.invuln = 0; farmer.sinceHit = 99;   // fully rested each night
             baits = new List<Bait>();
             flyingFruit = new List<FlyingFruit>();
-            tornados = new List<Tornado>();
-            lastTornadoAt = -99;
             if (!staticBuilt) MapGenerator.BuildStatic(this);   // hills + trees fixed for the whole game
             MapGenerator.NewNightTerrain(this);                    // only mud + branches are new tonight
             SpawnActors();
@@ -274,6 +280,8 @@ namespace Orchard
                 }
             }
             KeepOnlyYellow(); // only the scatterlings that survived fly again tonight
+            fallenBirds = new List<FallenBird>();
+            CheckRevive();
             while (night == 1 && CountYellow() < C.YELLOW_TARGET)
             {
                 Pos p = U.randSky();
@@ -357,12 +365,6 @@ namespace Orchard
             if (ui != null) ui.ShowWin(s, fruitSaved, fruitLost);
         }
 
-        public void FarmerDown()
-        {
-            running = false; gameOver = true;
-            if (ui != null) ui.ShowFarmerDown(night, fruitSaved, fruitLost);
-        }
-
         void Lose()
         {
             running = false; gameOver = true;
@@ -373,7 +375,7 @@ namespace Orchard
         public void StartClicked()
         {
             if (ui != null) ui.HideOverlay();
-            night = 1; fruitSaved = 0; fruitLost = 0; fruitFallen = 0; birdSaved = 0; tornadoCount = 0; birdsConfused = 0;
+            night = 1; fruitSaved = 0; fruitLost = 0; fruitFallen = 0; birdSaved = 0; revives = 0;
             gameOver = false; phase = Phase.Play;
             enemies = new List<Enemy>();
             StartNight();
@@ -383,7 +385,7 @@ namespace Orchard
         // "Play again" / "Try again" button
         public void Restart()
         {
-            night = 1; fruitSaved = 0; fruitLost = 0; fruitFallen = 0; birdSaved = 0; tornadoCount = 0; birdsConfused = 0;
+            night = 1; fruitSaved = 0; fruitLost = 0; fruitFallen = 0; birdSaved = 0; revives = 0;
             gameOver = false; phase = Phase.Play;
             enemies = new List<Enemy>();
             staticBuilt = false;
@@ -391,6 +393,34 @@ namespace Orchard
             if (ui != null) ui.HideOverlay();
             StartNight();
             running = true;
+        }
+
+        // ---- scatterlings bring trees back ----
+        // every REVIVE_COST fruit the scatterlings save buys one fallen tree back to life.
+        // if no tree is down the credit is kept until one falls.
+        public int ReviveBank { get { return birdSaved - revives * C.REVIVE_COST; } }
+
+        public void CheckRevive()
+        {
+            while (ReviveBank >= C.REVIVE_COST)
+            {
+                TreeEntity dead = null;
+                foreach (TreeEntity t in trees)
+                    if (!t.alive && (dead == null || t.diedAt < dead.diedAt)) dead = t;   // longest-fallen first
+                if (dead == null) return;
+                dead.alive = true; dead.hp = dead.maxhp; dead.fruit = 4;
+                dead.firstHit = double.PositiveInfinity; dead.flash = 0; dead.healGlow = 0.6; dead.revived = 2.0;
+                revives++;
+                LogEvent("Scatterlings revived a tree!");
+            }
+        }
+
+        public void BirdCaught(Bird b)
+        {
+            FallenBird fb = new FallenBird();
+            fb.x = b.x; fb.y = b.y; fb.h = b.flyH - System.Math.Sin(b.bob) * 3; fb.vh = -60;
+            fb.dir = b.dir; fb.spin = (b.dir < 0 ? -1 : 1) * 9; fb.rot = 0;
+            fallenBirds.Add(fb);
         }
 
         // ---- pack rule: a dog is only hurt while 2 or more shamblers bite it at the same time ----
@@ -413,54 +443,6 @@ namespace Orchard
             if (dog is Pip) ((Pip)dog).Hurt(dmg);
             else ((Thistle)dog).Hurt(dmg);
             LogOnce("bite" + (dog is Pip ? "p" : "t"), "Pack of " + n + " bites " + (dog is Pip ? "Pip" : "Thistle") + "!");
-        }
-
-        // ---- dust tornado made by circling shamblers ----
-        public void MakeTornado(Pos c)
-        {
-            tornados.Add(new Tornado(c.x, c.y));
-            lastTornadoAt = nightTime;
-            tornadoCount++;
-            LogEvent("Shamblers spun a dust tornado!");
-        }
-
-        void UpdateTornados(double dt)
-        {
-            for (int i = tornados.Count - 1; i >= 0; i--)
-            {
-                Tornado t = tornados[i];
-                t.life -= dt;
-                t.spin += dt;
-                if (t.life <= 0) { tornados.RemoveAt(i); continue; }
-                // the tornado drifts slowly toward the nearest scatterling it has not caught yet
-                Bird near = null; double nd = C.CELL * 12;
-                foreach (Enemy e in enemies)
-                {
-                    Bird b = e as Bird;
-                    if (b == null || b.bad || b.dead || t.hit.Contains(b)) continue;
-                    double d = U.dist(b, t);
-                    if (d < nd) { nd = d; near = b; }
-                }
-                if (near != null && nd > 1)
-                {
-                    t.x += (near.x - t.x) / nd * 70 * dt;
-                    t.y += (near.y - t.y) / nd * 70 * dt;
-                }
-                int n = 0;
-                foreach (Enemy e in enemies)
-                {
-                    Bird b = e as Bird;
-                    if (b == null || b.bad || b.dead || t.hit.Contains(b)) continue;
-                    if (U.dist(b, t) < t.r)
-                    {
-                        t.hit.Add(b);
-                        b.Confuse(t);
-                        birdsConfused++;
-                        n++;
-                    }
-                }
-                if (n > 0) LogOnce("dizzy", n + " scatterling" + (n > 1 ? "s" : "") + " dizzy: no fruit for 10s");
-            }
         }
 
         public void ShamblerAte(Shambler s)
@@ -488,6 +470,18 @@ namespace Orchard
             logLines.Add("[" + mm + ":" + ss + "] " + t);
             while (logLines.Count > 12) logLines.RemoveAt(0);
             if (ui != null) ui.SetLog(logLines);
+        }
+
+        // ---- rain ----
+        void InitRain()
+        {
+            rain = new List<RainDrop>();
+            for (int i = 0; i < 195; i++)
+            {
+                RainDrop r = new RainDrop();
+                r.x = U.R() * C.VW; r.y = U.R() * C.VH; r.l = 8 + U.R() * 10; r.s = 420 + U.R() * 220;
+                rain.Add(r);
+            }
         }
 
         // ---- input ----

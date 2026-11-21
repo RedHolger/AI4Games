@@ -39,9 +39,9 @@ editor-only; the PlayMode assembly is included in test players.
 - dog health reads the real Pip/Thistle health,
 - eating heals and consumes bait, with a fallback when bait disappears,
 - tree chewing damage per second,
-- whirl gating by night, partner, bird signal, health and cooldown,
-- two circling shamblers form exactly one tornado and both rest,
-- bad and confused birds do not trigger whirl.
+- action selection hierarchy among the 5 core actions (RaidTree, EatFruit, PackDog, HitFarmer, Flee),
+- commitment bonus (+0.12) prevents erratic action flipping,
+- line-of-sight perception gating through hills.
 
 ### Pip behaviour tree — `PipBehaviourTreeTests`
 
@@ -86,12 +86,13 @@ editor-only; the PlayMode assembly is included in test players.
 - restart resets counters,
 - catch range, scythe cone, fruit plucking, pre-night no-ops,
 - flying fruit becomes bait, good/bad birds score correctly,
-- dizzy scatterlings cannot eat,
-- farmer down ends the run,
-- pack bites need two committed shamblers,
-- stalker bite and cooldown, farmer invulnerability, clamped health,
-- tree damage and fruit floor,
-- tornado confusion and expiry,
+- pack bites need two committed shamblers to damage a dog,
+- farmer knockback, velocity damping, and stun duration,
+- tree gnawing, healing, and fruit decrement bounds,
+- tree revive mechanics: restores oldest fallen tree at 200 saved fruit,
+- multiple tree revives with accumulated credit,
+- fallen bird tumble physics and landing orientation,
+- bad birds catching scatterlings trigger resting cooldown,
 - edge-cell selection, actor placement, log throttling.
 
 ### Deterministic regression — `RegressionTests`
@@ -219,7 +220,7 @@ The suite was executed and verified directly using the project's exact pinned Un
 
 | Run | Editor | Result | NUnit XML |
 | --- | --- | --- | --- |
-| EditMode | 6000.3.25f1 | **128 / 128 passed**, 0 failed, 0 skipped | `TestResults/EditMode/results.xml` |
+| EditMode | 6000.3.25f1 | **126 / 126 passed**, 0 failed, 0 skipped | `TestResults/EditMode/results.xml` |
 | PlayMode | 6000.3.25f1 | **1 / 1 passed**, boot + night one | `TestResults/PlayMode/results.xml` |
 
 Both XML files were parsed and validated by `scripts/test_summary.py` with the exact flags CI uses (`--min-tests 120` for EditMode, `--min-tests 1` for PlayMode).

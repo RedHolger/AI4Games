@@ -13,9 +13,7 @@
   analysis, EditMode, PlayMode, Windows x64 and WebGL. A failed, cancelled or
   unexpectedly skipped mandatory job blocks the merge. See
   [`docs/CI_CD.md`](docs/CI_CD.md).
-- **Review policy:** Stanley, Zian and Manu. A member-authored PR needs the other
-  two approvals and an author `/signoff <head-sha>`; an external PR needs all
-  three. See [`docs/APPROVAL_POLICY.md`](docs/APPROVAL_POLICY.md).
+- **Review policy:** Maintained by **RedHolger**. An owner-authored PR uses author `/signoff <head-sha>`; external PRs require RedHolger's approval. See [`docs/APPROVAL_POLICY.md`](docs/APPROVAL_POLICY.md).
 - **Builds:** download `orchard-windows-x64` or `orchard-webgl` from the CI run's
   **Artifacts** section, or from **Releases** for tagged versions. WebGL
   compression is Disabled so the build runs from any static host. See

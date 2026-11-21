@@ -1,25 +1,14 @@
-# GitHub setup
+# GitHub setup for RedHolger/AI4Games
 
-This guide is for a repository administrator. The workflows and policy files are
-in the repository, but the GitHub-side settings, secrets and branch rules cannot
-be committed. They must be applied in the repository settings.
+This guide is for repository settings on [RedHolger/AI4Games](https://github.com/RedHolger/AI4Games). The workflows, build scripts, and policy files are committed, but the GitHub-side secrets and branch rules must be applied in the repository settings.
 
-The three reviewers are **Stanley**, **Zian** and **Manu**. Their real GitHub
-logins are not guessed anywhere in this repository. Replace the
-`REPLACE_ME_...` placeholders first.
+## 1. Team & Code Ownership
 
-## 1. Replace the roster placeholders
+The repository is configured for **RedHolger** as the owner and sole maintainer:
+- [`.github/team.json`](../.github/team.json)
+- [`.github/CODEOWNERS`](../.github/CODEOWNERS)
 
-Edit both files and use the same three logins:
-
-- `.github/team.json`
-- `.github/CODEOWNERS`
-
-`team.json` must contain exactly three members. `approval_policy.py` rejects a
-fourth member, duplicate logins, duplicate names and missing names.
-
-Do not add a bot or a shared account. An approval must come from a real,
-authenticated roster member.
+No placeholder replacements are required; `RedHolger` is already configured.
 
 ## 2. Add the Actions secrets
 
@@ -118,34 +107,19 @@ listed yet:
 The `Review gate` will be red while the roster is still a placeholder. That is
 the intended fail-closed behaviour.
 
-## 6. Bootstrap the approval gate
+## 6. Verify the approval gate
 
-The gate reads `.github/team.json` from the default branch. A pull request that
-introduces the real logins therefore cannot pass a gate that still sees the old
-placeholders. Use this one-time sequence:
+Because `RedHolger` is already set as the owner in `.github/team.json`, no placeholder bootstrap sequence is needed.
 
-1. In the bootstrap pull request, replace all three placeholders with the real
-   logins and update `CODEOWNERS` in the same commit.
-2. Have Stanley, Zian and Manu manually review the bootstrap pull request.
-3. Temporarily disable the `Review gate` required check, or use the ruleset's
-   administrator bypass, for this one merge.
-4. Merge the bootstrap pull request.
-5. Immediately re-enable `Review gate` and remove the bypass.
-6. Open a harmless test pull request and verify:
-   - with no approvals, `Review gate` is **BLOCKED**;
-   - with only one approval, it is still blocked;
-   - with the other two approvals and the author's `/signoff <head-sha>`, it
-     passes;
-   - a new push turns it red again and requires fresh approvals and a new
-     signoff;
-   - a protected-path change without `/approve-ci` is blocked.
-7. Close the test pull request without merging.
-
-Never leave the bypass or the disabled check in place.
+To verify the gate on a pull request:
+1. Open a pull request from a feature branch to `main`.
+2. Post `/signoff <head-sha>` as a comment on the pull request.
+3. Verify that `Review gate` turns **PASS**.
+4. Pushing a new commit turns it red again until signed off for the new SHA.
 
 ## 7. Verify the required checks
 
-On a real pull request, the **Checks** area should show:
+On a real pull request, the **Checks** area will show:
 
 - `Required checks`
 - `Review gate`
@@ -166,14 +140,13 @@ successful with an "allowed (docs-only)" note.
 A non-documentation pull request must show real Unity and build jobs. A
 cancelled, failed or unexpectedly skipped job must leave `Required checks` red.
 
-## 8. Release environment (recommended)
+## 8. Release environment (optional)
 
-For an extra release control, create **Settings > Environments > New
+For extra release control, create **Settings > Environments > New
 environment** named `release`:
 
-- Add Stanley, Zian and Manu as required reviewers.
+- Add **RedHolger** as a required reviewer.
 - Restrict deployment branches and tags to `v*` tags.
-- Do not allow administrators to bypass without an audit trail.
 
 If you want the workflow to wait for that environment, add
 `environment: release` to the `publish` job in

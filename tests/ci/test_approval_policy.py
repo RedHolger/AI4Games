@@ -340,9 +340,18 @@ class ApprovalPolicyTests(unittest.TestCase):
         self.assertFalse(sha_matches("c" * 7, HEAD))
         self.assertFalse(sha_matches("xyz", HEAD))
 
-    def test_load_team_rejects_wrong_roster_size(self):
+    def test_load_team_rejects_empty_roster(self):
         with self.assertRaises(TeamConfigError):
-            load_team({"members": TEAM["members"][:2]})
+            load_team({"members": []})
+
+    def test_load_team_accepts_solo_roster(self):
+        team = {
+            "members": [{"name": "RedHolger", "login": "RedHolger"}],
+            "requiredApprovals": {"memberAuthored": 0, "externalAuthored": 1},
+        }
+        config = load_team(team)
+        self.assertEqual(0, config["requiredApprovals"]["memberAuthored"])
+        self.assertEqual(1, config["requiredApprovals"]["externalAuthored"])
 
     def test_load_team_rejects_duplicate_logins(self):
         team = {

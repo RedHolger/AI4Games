@@ -6,16 +6,17 @@ using UnityEngine.UI;
 namespace Orchard
 {
     // the page around the board. exactly 16:9: a slim sidebar (15%) + the landscape board (85%).
-    // sidebar: header, night track, stat cards , live ai agents, event log.
-    // board area: start / win / lose card and a plain card between nights.
+    // sidebar: header, night track, stat cards (incl. tree-revive progress), live ai agents, event log.
+    // board area: start / win / lose card and the sunrise -> sunset scene between nights.
     public class OrchardUI
     {
         OrchardGame g;
         Font sans, mono;
         CanvasScaler scaler;
-        RectTransform wrap, shadowRT, sideBg, leftBg, overlay, overlayContent, transitionRT, timeFill, logLayer, card;
+        RectTransform wrap, shadowRT, sideBg, leftBg, overlay, overlayContent, transitionRT, timeFill, logLayer, card, reviveFill;
         Text nightText, seasonText, timeText;
         Text[] statVal = new Text[4];
+        Text reviveLab;
         Image[] pips = new Image[13];
         RectTransform pipGlow;
         Image pipGlowImg;
@@ -125,10 +126,10 @@ namespace Orchard
             timeFill = NewRect("timefill", bar, 0, 0, CW, 6);
             AddImage(timeFill, Color.white, Gradient(U.hex(0xc76b3f), U.hex(0xe9b850), false), false, 1);
 
-            // 2 x 2 stat cards: saved, lost, trees, tornados
+            // 2 x 2 stat cards: saved, lost, trees, tree revive
             string[] icons = { "icon_apple", "icon_heart", "icon_tree", "scatterling" };
-            string[] labs = { "fruit saved", "lost to birds", "trees left", "tornados" };
-            string[] init = { "0 / 0", "0", "6 / 6", "0" };
+            string[] labs = { "fruit saved", "lost to birds", "trees left", "to revive a tree" };
+            string[] init = { "0 / 0", "0", "6 / 6", "0 / " + C.REVIVE_COST };
             Color[] vcol = { U.hex(0x8fd36a), U.hex(0xe8806a), INK, U.hex(0xf1d23a) };
             float cw2 = (CW - CARD_GAP) / 2f;
             for (int i = 0; i < 4; i++)
@@ -145,6 +146,15 @@ namespace Orchard
                 }
                 statVal[i] = MakeText(wrap, "val", x + 7, y + 19, cw2 - 9, 17, i == 3 ? 12.5f : 14.5f, vcol[i], true, sans, TextAnchor.MiddleLeft, init[i]);
                 Text lb = MakeText(wrap, "lab", x + 7, y + 33, cw2 - 8, 10, 8, MUTED, false, sans, TextAnchor.MiddleLeft, labs[i]);
+                if (i == 3)
+                {
+                    reviveLab = lb;
+                    RectTransform rb = NewRect("revbar", wrap, x + cw2 - 30, y + 9, 23, 4);
+                    AddImage(rb, U.rgba(255, 255, 255, .10f), Rounded(2), true, 4);
+                    rb.gameObject.AddComponent<Mask>().showMaskGraphic = true;
+                    reviveFill = NewRect("revfill", rb, 0, 0, 0, 4);
+                    AddImage(reviveFill, U.hex(0xf1d23a), null, false, 1);
+                }
             }
 
             MakeSpaced(wrap, PAD, AGENTS_Y, "AI AGENTS", 9, U.hex(0x8fa878), false, 1.4f);
@@ -183,22 +193,131 @@ namespace Orchard
             Relayout();
         }
 
-        // ---------------- plain between-nights card (no sunrise scene) ----------------
-        Image skyTop;
-        Text scTitle, scSub;
+        // ---------------- sunrise -> day -> sunset scene ----------------
+        Image skyTop, skyHor, sun, sunGlow, groundImg, vign;
+        Image[] stars = new Image[34], clouds = new Image[9], hillsBack = new Image[3], hillsFront = new Image[2], sceneTrees = new Image[5];
+        Color[] starBase = new Color[34];
+        Text scCap, scTitle, scSub, scTitleSh, scSubSh;
+        float[] cloudX = new float[9];
+        const float HORIZON = 500;
 
         void BuildScene()
         {
-            skyTop = AddImage(NewRect("skytop", transitionRT, 0, 0, LEFT_W, H), U.hex(0x14110d), null, false, 1);
-            scTitle = MakeText(transitionRT, "title", 0, 300, LEFT_W, 56, 40, Color.white, true, sans, TextAnchor.MiddleCenter, "");
-            scSub = MakeText(transitionRT, "sub", 0, 362, LEFT_W, 24, 18, Color.white, false, sans, TextAnchor.MiddleCenter, "");
+            Sprite disc = Shapes.Circle(), glow = Shapes.Radial(128, 0);
+            skyTop = AddImage(NewRect("skytop", transitionRT, 0, 0, LEFT_W, H), Color.black, null, false, 1);
+            skyHor = AddImage(NewRect("skyhor", transitionRT, 0, 0, LEFT_W, HORIZON + 60), Color.white, Gradient(new Color(1, 1, 1, 0), Color.white, true), false, 1);
+            for (int i = 0; i < stars.Length; i++)
+            {
+                float sx = (float)(Hash(i, 1) * LEFT_W), sy = (float)(Hash(i, 2) * (HORIZON - 120)), sz = 1.6f + (float)Hash(i, 3) * 1.8f;
+                stars[i] = AddImage(NewRect("star", transitionRT, sx, sy, sz, sz), Color.white, disc, false, 1);
+                starBase[i] = new Color(1, 0.97f, 0.88f, 0.5f + (float)Hash(i, 4) * 0.5f);
+            }
+            sunGlow = AddImage(NewRect("sunglow", transitionRT, 0, 0, 300, 300), Color.white, glow, false, 1);
+            sun = AddImage(NewRect("sun", transitionRT, 0, 0, 68, 68), Color.white, disc, false, 1);
+            float[,] cl = { { 150, 140 }, { 520, 96 }, { 870, 170 } };
+            for (int c = 0; c < 3; c++)
+                for (int k = 0; k < 3; k++)
+                {
+                    float w = k == 0 ? 96 : (k == 1 ? 70 : 62), h = k == 0 ? 44 : (k == 1 ? 40 : 30);
+                    float ox = k == 0 ? 0 : (k == 1 ? -38 : 40), oy = k == 0 ? 0 : (k == 1 ? 6 : 8);
+                    cloudX[c * 3 + k] = cl[c, 0] + ox - w / 2;
+                    clouds[c * 3 + k] = AddImage(NewRect("cloud", transitionRT, cloudX[c * 3 + k], cl[c, 1] + oy - h / 2, w, h), Color.white, disc, false, 1);
+                }
+            float[,] hb = { { 180, 560, 330, 150 }, { 600, 580, 380, 160 }, { 980, 556, 320, 140 } };
+            for (int i = 0; i < 3; i++)
+                hillsBack[i] = AddImage(NewRect("hillb", transitionRT, hb[i, 0] - hb[i, 2], hb[i, 1] - hb[i, 3], hb[i, 2] * 2, hb[i, 3] * 2), Color.white, disc, false, 1);
+            float[,] hf = { { 280, 700, 520, 190 }, { 860, 706, 560, 200 } };
+            for (int i = 0; i < 2; i++)
+                hillsFront[i] = AddImage(NewRect("hillf", transitionRT, hf[i, 0] - hf[i, 2], hf[i, 1] - hf[i, 3], hf[i, 2] * 2, hf[i, 3] * 2), Color.white, disc, false, 1);
+            groundImg = AddImage(NewRect("ground", transitionRT, 0, 650, LEFT_W, H - 650), Color.white, null, false, 1);
+            Sprite ts;
+            if (g.img.TryGetValue("tree", out ts))
+            {
+                float[,] tp = { { 150, 556, 78 }, { 300, 534, 92 }, { 560, 548, 70 }, { 780, 528, 96 }, { 950, 552, 80 } };
+                for (int i = 0; i < 5; i++)
+                {
+                    float th = tp[i, 2], tw = th * ts.rect.width / ts.rect.height;
+                    sceneTrees[i] = AddImage(NewRect("stree", transitionRT, tp[i, 0] - tw / 2, tp[i, 1] - th, tw, th), Color.white, ts, false, 1);
+                }
+            }
+            vign = AddImage(NewRect("vign", transitionRT, -LEFT_W * 0.25f, -H * 0.4f, LEFT_W * 1.5f, H * 1.8f), Color.black, Shapes.Radial(256, 2), false, 1);
+            scCap = MakeText(transitionRT, "cap", 0, 104, LEFT_W, 18, 13, Color.white, true, sans, TextAnchor.MiddleCenter, "");
+            scTitleSh = MakeText(transitionRT, "titlesh", 2, 128, LEFT_W, 56, 46, Color.black, true, sans, TextAnchor.MiddleCenter, "");
+            scTitle = MakeText(transitionRT, "title", 0, 126, LEFT_W, 56, 46, Color.white, true, sans, TextAnchor.MiddleCenter, "");
+            scSubSh = MakeText(transitionRT, "subsh", 1, 189, LEFT_W, 24, 18, Color.black, false, sans, TextAnchor.MiddleCenter, "");
+            scSub = MakeText(transitionRT, "sub", 0, 188, LEFT_W, 24, 18, Color.white, false, sans, TextAnchor.MiddleCenter, "");
         }
+
+        static double Hash(int a, int b)
+        {
+            unchecked
+            {
+                uint h = (uint)(a * 73856093) ^ (uint)(b * 19349663) ^ 0x9e3779b9u;
+                h = (h ^ (h >> 13)) * 1274126177u;
+                h ^= h >> 16;
+                return h / 4294967296.0;
+            }
+        }
+
+        // sky colour keyframes: night, dawn, noon, dusk, night
+        static readonly Color[] TOP = { new Color(.05f, .07f, .19f), new Color(.24f, .30f, .58f), new Color(.45f, .72f, .93f), new Color(.30f, .22f, .48f), new Color(.05f, .07f, .19f) };
+        static readonly Color[] HOR = { new Color(.16f, .18f, .36f), new Color(.98f, .62f, .44f), new Color(1f, .90f, .68f), new Color(.96f, .50f, .34f), new Color(.16f, .18f, .36f) };
+
+        static Color Key(Color[] k, float p)
+        {
+            float f = Mathf.Clamp01(p) * (k.Length - 1);
+            int i = Mathf.Min((int)f, k.Length - 2);
+            return Color.Lerp(k[i], k[i + 1], f - i);
+        }
+
+        static Color A(Color c, float a) { return new Color(c.r, c.g, c.b, c.a * a); }
 
         void UpdateScene(float p, float fade, string msg, string sub)
         {
-            skyTop.color = new Color(0.08f, 0.07f, 0.05f, fade);
-            SetT(scTitle, msg, new Color(1f, .97f, .90f, fade));
-            SetT(scSub, sub, new Color(1f, .95f, .85f, 0.92f * fade));
+            float day = Mathf.Sin(p * Mathf.PI);             // 0 at the night ends, 1 at noon
+            float night = Mathf.Pow(1 - day, 3);
+            Color top = Key(TOP, p), hor = Key(HOR, p);
+            skyTop.color = A(top, fade);
+            skyHor.color = A(hor, fade);
+            for (int i = 0; i < stars.Length; i++)
+            {
+                float tw = 0.75f + 0.25f * Mathf.Sin(Time.unscaledTime * 3 + i);
+                stars[i].color = A(starBase[i], fade * night * tw);
+            }
+            // the sun climbs from the left horizon, peaks, and sets on the right
+            float sx = LEFT_W * (0.10f + 0.80f * p), sy = HORIZON + 30 - day * 340;
+            Color sc = Color.Lerp(new Color(1f, .52f, .28f), new Color(1f, .93f, .62f), day);
+            sun.rectTransform.anchoredPosition = new Vector2(sx - 34, -(sy - 34));
+            sun.color = A(sc, fade);
+            sunGlow.rectTransform.anchoredPosition = new Vector2(sx - 150, -(sy - 150));
+            sunGlow.color = A(new Color(sc.r, sc.g * 0.95f, sc.b * 0.8f, 0.55f + 0.2f * (1 - day)), fade);
+            // clouds drift and catch the light
+            Color cloud = Color.Lerp(Color.Lerp(new Color(.20f, .22f, .40f), hor, 0.55f), Color.white, day * 0.85f);
+            for (int i = 0; i < clouds.Length; i++)
+            {
+                RectTransform rt = clouds[i].rectTransform;
+                rt.anchoredPosition = new Vector2(cloudX[i] + p * 60, rt.anchoredPosition.y);
+                clouds[i].color = A(new Color(cloud.r, cloud.g, cloud.b, 0.92f), fade);
+            }
+            Color hillB = Color.Lerp(new Color(.10f, .12f, .24f), new Color(.42f, .62f, .38f), day);
+            Color hillF = Color.Lerp(new Color(.06f, .08f, .16f), new Color(.31f, .50f, .26f), day);
+            for (int i = 0; i < hillsBack.Length; i++) hillsBack[i].color = A(Color.Lerp(hillB, hor, 0.18f * (1 - day)), fade);
+            for (int i = 0; i < hillsFront.Length; i++) hillsFront[i].color = A(hillF, fade);
+            groundImg.color = A(hillF, fade);
+            Color treeTint = Color.Lerp(new Color(.10f, .10f, .18f), Color.white, Mathf.Clamp01(day * 1.15f - 0.05f));
+            foreach (Image t in sceneTrees) if (t != null) t.color = A(treeTint, fade);
+            vign.color = A(new Color(0, 0, 0, 0.55f), fade);
+
+            // words: sunrise first (the night is survived), then sunset into the next night
+            bool rising = p < 0.5f;
+            float tf = Mathf.Clamp01(Mathf.Abs(p - 0.5f) * 8f);     // quick cross-fade at noon
+            Color ink = new Color(1f, .97f, .90f, fade * tf);
+            Color shade = new Color(0, 0, 0, 0.35f * fade * tf);
+            SetT(scCap, rising ? "S U N R I S E" : "S U N S E T", new Color(1f, .86f, .55f, fade * tf));
+            string title = rising ? "Dawn" : msg;
+            string st = rising ? sub : "The rain returns. Get ready!";
+            SetT(scTitle, title, ink); SetT(scTitleSh, title, shade);
+            SetT(scSub, st, new Color(1f, .95f, .85f, 0.92f * fade * tf)); SetT(scSubSh, st, shade);
         }
 
         static void SetT(Text t, string s, Color c)
@@ -328,7 +447,7 @@ namespace Orchard
                 else if (e.type == "bad") bb++;
             }
             // the most interesting thing the shamblers are deciding right now
-            int pack = 0, flee = 0, eat = 0, hitf = 0, whirl = 0;
+            int pack = 0, flee = 0, eat = 0, hitf = 0;
             foreach (Enemy e in g.enemies)
             {
                 Shambler s = e as Shambler;
@@ -337,11 +456,8 @@ namespace Orchard
                 else if (s.act == ShamAct.Flee) flee++;
                 else if (s.act == ShamAct.EatFruit) eat++;
                 else if (s.act == ShamAct.HitFarmer) hitf++;
-                else if (s.act == ShamAct.Whirl) whirl++;
             }
             if (sh == 0) SetChip(3, "None", MUTED);
-            else if (g.tornados.Count > 0) SetChip(3, "Tornado!", GameRenderer.ACT_COL[5]);
-            else if (whirl >= 2) SetChip(3, whirl + " whirling", GameRenderer.ACT_COL[5]);
             else if (pack >= 2) SetChip(3, "Pack of " + pack + "!", GameRenderer.ACT_COL[2]);
             else if (hitf > 0) SetChip(3, "Hitting you!", GameRenderer.ACT_COL[3]);
             else if (flee > 0) SetChip(3, flee + " fleeing", GameRenderer.ACT_COL[4]);
@@ -362,8 +478,14 @@ namespace Orchard
             string ts = (secs / 60) + ":" + (secs % 60).ToString("00");
             if (timeText.text != ts) timeText.text = ts;
 
-            string tv = g.tornadoCount.ToString();
-            if (statVal[3].text != tv) statVal[3].text = tv;
+            // tree revive progress (fruit saved by scatterlings)
+            int bank = g.ReviveBank;
+            bool waiting = bank >= C.REVIVE_COST;
+            string rv = waiting ? "Ready!" : bank + " / " + C.REVIVE_COST;
+            if (statVal[3].text != rv) statVal[3].text = rv;
+            string rl = waiting ? "revives next fallen tree" : (g.revives > 0 ? "revived " + g.revives + "  ·  next tree" : "to revive a tree");
+            if (reviveLab.text != rl) reviveLab.text = rl;
+            reviveFill.sizeDelta = new Vector2(23f * Mathf.Clamp01(bank / (float)C.REVIVE_COST), 4);
         }
 
         void SetNight(int night)
@@ -401,6 +523,7 @@ namespace Orchard
         {
             if (msg.StartsWith("===")) return "f4ecdd";
             if (msg.Contains("tree has fallen")) return "f06a55";
+            if (msg.Contains("revived")) return "ffe08a";
             if (msg.StartsWith("Pip")) return "9cd98a";
             if (msg.StartsWith("Thistle")) return "e3c06a";
             if (msg.StartsWith("Shambler")) return "c3b2e0";
@@ -423,6 +546,7 @@ namespace Orchard
             if (m == "Shambler ate a fruit to heal") return "Shambler ate fruit +3hp";
             if (m == "Shambler goes for fruit to heal") return "Shambler wants fruit";
             if (m == "Shambler turns on the farmer") return "Shambler hits back!";
+            if (m == "Shambler knocked the farmer back!") return "You got knocked back!";
             if (m == "Pip is hurt, running to the farmer") return "Pip hurt, runs to you";
             if (m == "Pip repairs the weakest tree") return "Pip: fix weakest tree";
             if (m == "Stalker detected target") return "Stalker spotted you!";
@@ -430,6 +554,7 @@ namespace Orchard
             if (m == "Scatterling saved a fruit") return "Scatterling saved fruit";
             if (m == "Bad bird caught a scatterling") return "Bad bird caught one!";
             if (m == "Bad bird stole a fruit") return "Bad bird stole fruit";
+            if (m == "Scatterlings revived a tree!") return "Birds revived a tree!";
             if (m.StartsWith("Map built")) return "Map built + validated";
             Match nm = Regex.Match(m, @"^Night (\d+) survived, (\d+)/6 trees stand$");
             if (nm.Success) return "Night " + nm.Groups[1].Value + " survived " + nm.Groups[2].Value + "/6";
@@ -496,7 +621,7 @@ namespace Orchard
         public void ShowTitle()
         {
             BuildOverlay("Orchard of the Last Season", U.hex(0xe9b850),
-                "Defend your <b>6 trees</b> for <b>13 nights</b> (1 min each). <b>Yellow birds</b> save fallen fruit by eating it; <b>black birds</b> steal it and hunt the yellows. <b>Pip</b> repairs your weakest tree; <b>Thistle</b> hunts. Rain brings mud, hills and bushes the enemies can't cross — but you can.",
+                "Defend your <b>6 trees</b> for <b>13 nights</b> (1 min each). <b>Yellow birds</b> save fallen fruit by eating it; <b>black birds</b> steal it and hunt the yellows. Every <b>" + C.REVIVE_COST + "</b> fruit the yellows save brings a fallen tree back to life. <b>Pip</b> repairs your weakest tree; <b>Thistle</b> hunts. Rain brings mud, hills and bushes the enemies can't cross — but you can.",
                 true, "Begin Night 1", g.StartClicked);
         }
 
@@ -511,13 +636,6 @@ namespace Orchard
         {
             BuildOverlay("The last tree has fallen", U.hex(0xe9b850),
                 "You held to night <b>" + night + "</b>.<br><b>" + saved + "</b> saved · <b>" + lost + "</b> lost.",
-                false, "Try again", g.Restart);
-        }
-
-        public void ShowFarmerDown(int night, int saved, int lost)
-        {
-            BuildOverlay("The farmer has fallen", U.hex(0xe9b850),
-                "A stalker caught you on night <b>" + night + "</b>.<br><b>" + saved + "</b> saved · <b>" + lost + "</b> lost.",
                 false, "Try again", g.Restart);
         }
 
@@ -568,9 +686,9 @@ namespace Orchard
 
             tabLegend = NewRect("tablegend", wrap, SIDE_W + 10, H - 30 - 26, 360, 22);
             AddImage(tabLegend, U.rgba(20, 16, 10, .78f), Rounded(10), true, 4);
-            string[] names = { "Raid tree", "Eat fruit", "Pack a dog", "Hit farmer", "Flee", "Whirl" };
+            string[] names = { "Raid tree", "Eat fruit", "Pack a dog", "Hit farmer", "Flee" };
             float lx = 10;
-            for (int i = 0; i < Shambler.N_ACT; i++)
+            for (int i = 0; i < 5; i++)
             {
                 AddImage(NewRect("sw", tabLegend, lx, 7, 8, 8), GameRenderer.ACT_COL[i], Rounded(2), true, 4);
                 MakeText(tabLegend, "n", lx + 11, 0, 80, 22, 9.5f, INK, true, sans, TextAnchor.MiddleLeft, names[i]);

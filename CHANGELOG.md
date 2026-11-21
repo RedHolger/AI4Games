@@ -26,6 +26,8 @@ semantic version tags (`vMAJOR.MINOR.PATCH`).
   SHA-256 checksums.
 - Contributor, security, CI, testing, approval, release and GitHub-setup guides.
 - A dependency-free CI tooling suite under `tests/ci/`.
+- Updated game code from the latest package: Tree Revive mechanic, fallen bird tumble physics, rain ambient effects, gamma color setup, and high-DPI sharpening tools.
+- Streamlined `Review gate` for personal repository ownership (`RedHolger/AI4Games`) with author `/signoff` and external maintainer approvals.
 
 ### Changed
 

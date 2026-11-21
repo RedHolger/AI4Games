@@ -11,24 +11,13 @@ namespace Orchard
         public const int VW = WORLD_W, VH = WORLD_H;
         public const int GRASS = 0, BUSH = 1, HILL = 2, MUD = 3, LOG = 4;   // LOG = fallen log across a path (new each night)
         public const int YELLOW_TARGET = 5;     // scatterlings at the start of the game (they are not replaced)
+        public const int REVIVE_COST = 200;     // fruit saved by scatterlings to bring one fallen tree back
 
         public const double TREE_HP = 70, FARMER_SPEED = 165, DOG_SPEED = 175, SCYTHE_RANGE = 72, SCYTHE_DMG = 3.2;
         public const double CATCH_RANGE = 78, NIGHT_LEN = 60;
         public const int TOTAL_NIGHTS = 13;
         public const double TRANS_LEN = 3.4;
-        public const double WHIRL_NIGHT = 2;        // shamblers learn the dust whirl from night 2
-        public const double WHIRL_SPIN = 1.4;        // seconds 2+ shamblers must circle before the tornado forms
-        public const double TORNADO_LIFE = 5.0;      // a tornado spins this long
-        public const double CONFUSE_T = 5.0;         // a scatterling caught in it is dizzy this long
-        public const double NO_EAT_T = 10.0;         // and cannot eat fruit this long
-        public const double WHIRL_COOLDOWN = 16.0;   // a shambler rests this long before whirling again
-        public const double FARMER_HP = 10;          // farmer health: forgiving on purpose
-        public const double STALKER_DMG = 1;         // one stalker bite
-        public const double STALKER_HIT_CD = 1.6;    // a stalker bites at most this often
-        public const double FARMER_INVULN = 1.2;     // after any hit the farmer cannot be hit again for this long
-        public const double FARMER_REGEN_DELAY = 5;  // seconds without a hit before healing starts
-        public const double FARMER_REGEN = 0.5;      // hp per second while healing
-        public const double KILL_COOLDOWN = 10.0;  // a bad bird rests this long after catching a scatterling
+        public const double KILL_COOLDOWN = 10.0;  // a bad bird rests this long after catching a scatterling   // sunrise -> day -> sunset between nights
     }
 
     // a point in canvas pixels (x right, y down), same as the html canvas.
@@ -75,16 +64,21 @@ namespace Orchard
         public double seed;
     }
 
-    // a dust tornado made by shamblers walking in a circle; confuses scatterlings that fly into it
-    public class Tornado : Pos
-    {
-        public double life = C.TORNADO_LIFE, r = C.CELL * 3, spin;
-        public HashSet<object> hit = new HashSet<object>();   // each bird is confused once per tornado
-        public Tornado(double x, double y) : base(x, y) { }
-    }
-
     public class Tuft : Pos
     {
+    }
+
+    // a scatterling caught by a bad bird: tumbles out of the sky and lies on the ground till dawn
+    public class FallenBird : Pos
+    {
+        public double h, vh, rot, spin, t;
+        public int dir;
+        public bool landed;
+    }
+
+    public class RainDrop
+    {
+        public double x, y, l, s;
     }
 
     public class SpawnEvent

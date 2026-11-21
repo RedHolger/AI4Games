@@ -22,14 +22,9 @@ namespace Orchard
     //   HitFarmer     hit back at the farmer                he hit me recently, he is close, my health
     //   Flee          run to the safest reachable spot,     how hurt i am, how close danger is
     //                 heal slowly, eat fruit on the way
-    //   Whirl         (from night 2) walk in a tight circle  scatterlings right above me or flying
-    //                 with another shambler; after 1.4 s     on a path that crosses mine, a partner
-    //                 of circling a dust tornado forms that  shambler close by (or already whirling),
-    //                 makes scatterlings dizzy for 5 s and   no tornado here already, my health
-    //                 stops them eating fruit for 10 s
     //
     //  extra rules that make it behave well:
-    //   - commitment: the option it is already doing gets +0.12 (+0.2 for a started whirl), so it does not flip every frame
+    //   - commitment: the option it is already doing gets +0.12, so it does not flip every frame
     //   - compensation: multiplying many numbers < 1 punishes options with more considerations,
     //     so each score is corrected for how many considerations it has (dave mark's method)
     //   - perception: it only knows about dogs, the farmer and other shamblers it can SEE
@@ -38,7 +33,7 @@ namespace Orchard
     //     another already biting a dog decides to come and help
     // ======================================================================
 
-    public enum ShamAct { RaidTree, EatFruit, PackDog, HitFarmer, Flee, Whirl }
+    public enum ShamAct { RaidTree, EatFruit, PackDog, HitFarmer, Flee }
 
     public static class Utility
     {
@@ -80,13 +75,7 @@ namespace Orchard
         public TreeEntity treeT;
         public Bait fruitT;
         public Mover dogT;
-        public double[] scores = new double[6];
-        public const int N_ACT = 6;
-
-        // whirl (dust tornado) state
-        public Pos whirlC;          // centre of the circle we walk round (shared with partners)
-        public double whirlCd;      // rest time before i may whirl again
-        double whirlA, whirlT, whirlWait;
+        public double[] scores = new double[5];
 
         double thinkT;
         double hitCd;
@@ -198,10 +187,6 @@ namespace Orchard
             double recent = Utility.Clamp01(1 - (G.nightTime - lastHitByFarmer) / 2.0);
             double hitF = hitCd > 0 ? 0 : Utility.Score(0.85, recent, Utility.Near(U.dist(this, G.farmer), C.CELL * 2.5), healthy);
 
-            // Whirl: team up to spin a dust tornado when scatterlings are overhead or on their way
-            Pos wc;
-            double whirl = WhirlScore(healthy, out wc);
-
             // Flee: hurt and in danger
             double threat = DangerAt(this);
             double flee = Utility.Score(1.0, injury, 0.45 + 0.55 * threat);
@@ -211,13 +196,12 @@ namespace Orchard
             scores[(int)ShamAct.PackDog] = bestDog;
             scores[(int)ShamAct.HitFarmer] = hitF;
             scores[(int)ShamAct.Flee] = flee;
-            scores[(int)ShamAct.Whirl] = whirl;
 
             // commitment bonus for what it is already doing
             double[] s2 = (double[])scores.Clone();
-            s2[(int)act] += act == ShamAct.Whirl ? 0.2 : 0.12;   // a started circle is worth finishing
+            s2[(int)act] += 0.12;
             int best = 0;
-            for (int i = 1; i < N_ACT; i++) if (s2[i] > s2[best]) best = i;
+            for (int i = 1; i < 5; i++) if (s2[i] > s2[best]) best = i;
             ShamAct next = (ShamAct)best;
 
             if (next != act || (next == ShamAct.PackDog && bd != dogT))
@@ -226,77 +210,11 @@ namespace Orchard
                 else if (next == ShamAct.Flee) G.LogOnce("flee", "Shambler hurt, fleeing to heal");
                 else if (next == ShamAct.HitFarmer) G.LogOnce("hitback", "Shambler turns on the farmer");
                 else if (next == ShamAct.EatFruit && injury > 0.3) G.LogOnce("eatheal", "Shambler goes for fruit to heal");
-                else if (next == ShamAct.Whirl) G.LogOnce("whirl", "Shamblers start circling: a tornado is coming!");
                 nav.Reset();
                 safeSpot = null;
-                if (next == ShamAct.Whirl) { whirlC = wc; whirlT = 0; whirlWait = 0; whirlA = System.Math.Atan2(y - wc.y, x - wc.x); }
-                else whirlC = null;
             }
-            else if (next == ShamAct.Whirl && whirlC == null) whirlC = wc;
             act = next;
             treeT = bt; fruitT = bf; dogT = bd;
-        }
-
-        // ---------------- whirl: how much do i want to spin a tornado right now? ----------------
-        // birds: a scatterling right above me, or flying on a line that will pass over me soon
-        public static double BirdSignal(Pos me)
-        {
-            double best = 0;
-            foreach (Enemy e in U.G.enemies)
-            {
-                Bird b = e as Bird;
-                if (b == null || b.bad || b.dead || b.noEatT > 0) continue;     // already confused birds do not count
-                double d = U.dist(me, b);
-                double overhead = Utility.Near(d, C.CELL * 6);
-                double approach = 0;
-                double vl = U.hypot(b.vx, b.vy);
-                if (vl > 0.01)
-                {
-                    double ux = b.vx / vl, uy = b.vy / vl;
-                    double rx = me.x - b.x, ry = me.y - b.y;
-                    double along = rx * ux + ry * uy;                         // how far ahead of the bird i am
-                    if (along > 0 && along < C.CELL * 9)
-                    {
-                        double perp = System.Math.Abs(rx * uy - ry * ux);      // how far its line misses me
-                        if (perp < C.CELL * 2.5)
-                            approach = 0.9 * (1 - perp / (C.CELL * 2.5)) * (0.4 + 0.6 * Utility.Near(along, C.CELL * 9));
-                    }
-                }
-                double far = 0.4 * Utility.Near(d, C.CELL * 14);               // seen further off: a weaker pull
-                double sig = System.Math.Max(System.Math.Max(overhead, approach), far);
-                if (sig > best) best = sig;
-            }
-            return best;
-        }
-
-        double WhirlScore(double healthy, out Pos centre)
-        {
-            OrchardGame G = U.G;
-            centre = null;
-            if (G.night < C.WHIRL_NIGHT || whirlCd > 0) return 0;
-            if (act != ShamAct.Whirl && G.nightTime - G.lastTornadoAt < 6) return 0;   // the dust needs a moment to settle
-            // a partner already whirling near me: join its circle
-            Shambler joinS = null, mate = null;
-            double jd = C.CELL * 6, md = C.CELL * 6;     // partners meet in the middle
-            foreach (Enemy e in G.enemies)
-            {
-                Shambler s = e as Shambler;
-                if (s == null || s == this || s.dead) continue;
-                double d = U.dist(this, s);
-                if (s.act == ShamAct.Whirl && s.whirlC != null && U.dist(this, s.whirlC) < jd) { jd = U.dist(this, s.whirlC); joinS = s; }
-                else if (s.act != ShamAct.Flee && s.whirlCd <= 0 && d < md && CanSee(s)) { md = d; mate = s; }
-            }
-            double partner;
-            if (joinS != null) { partner = 1.0; centre = joinS.whirlC; }
-            else if (mate != null) { partner = 0.8; centre = new Pos((x + mate.x) / 2, (y + mate.y) / 2); }
-            else return 0;                                   // a tornado needs at least two shamblers
-            if (act == ShamAct.Whirl && whirlC != null) centre = whirlC;   // keep my circle once started
-            if (G.tornados.Count > 0) return 0;                       // one tornado at a time
-            double birds = BirdSignal(centre);
-            // once a circle has started, the others keep going even if the birds drift a little
-            if (joinS != null || act == ShamAct.Whirl) birds = System.Math.Max(birds, 0.7);
-            if (birds <= 0) return 0;
-            return Utility.Score(1.15, 0.3 + 0.7 * birds, partner, healthy);
         }
 
         bool Interferes(Mover dog)
@@ -323,7 +241,6 @@ namespace Orchard
             bool onMud = U.terr(x, y) == C.MUD;
             double spd = speed * (onMud ? 0.45 : 1);
             if (hitCd > 0) hitCd -= dt;
-            if (whirlCd > 0) whirlCd -= dt;
 
             thinkT -= dt;
             if (thinkT <= 0) { thinkT = 0.25; Think(); }
@@ -332,13 +249,11 @@ namespace Orchard
             if (act == ShamAct.EatFruit && (fruitT == null || !G.baits.Contains(fruitT))) { thinkT = 0; act = ShamAct.RaidTree; }
             if (act == ShamAct.PackDog && (dogT == null || DogHp(dogT) <= 0)) { thinkT = 0; act = ShamAct.RaidTree; }
             if (act == ShamAct.RaidTree && (treeT == null || !treeT.alive)) treeT = nearTree();
-            if (act == ShamAct.Whirl && whirlC == null) { thinkT = 0; act = ShamAct.RaidTree; }
 
             if (act == ShamAct.RaidTree) DoRaid(spd, dt);
             else if (act == ShamAct.EatFruit) DoEat(spd, dt);
             else if (act == ShamAct.PackDog) DoPack(spd, dt);
             else if (act == ShamAct.HitFarmer) DoHitFarmer(spd, dt);
-            else if (act == ShamAct.Whirl) DoWhirl(spd, dt);
             else DoFlee(spd, dt);
 
             Steering.separate(this, dt);
@@ -393,71 +308,16 @@ namespace Orchard
             double d = U.dist(this, f);
             if (d < 26 && hitCd <= 0)
             {
+                f.KnockBack(this, 230, 0.55);
                 hitCd = 4.0;
                 lastHitByFarmer = -99;     // grudge settled
-                U.G.LogOnce("knock", "Shambler swiped at the farmer (grudge)");
+                U.G.LogOnce("knock", "Shambler knocked the farmer back!");
                 thinkT = 0;
                 return;
             }
             if (Perception.WalkableLine(this, f)) { nav.timer -= dt; Steering.steer(this, f, spd * 1.15, dt, Steering.moveGround); }
             else GoTo(U.w2c(f.x, f.y), 5000, spd, dt);
         }
-
-        // walk round the shared centre; once 2+ of us have circled it for WHIRL_SPIN seconds,
-        // the dust rises into a tornado
-        public const double WHIRL_R = 18;
-        void DoWhirl(double spd, double dt)
-        {
-            OrchardGame G = U.G;
-            Pos c = whirlC;
-            whirlWait += dt;
-            double d = U.dist(this, c);
-            if (d > WHIRL_R + 22)
-            {
-                if (Perception.WalkableLine(this, c)) { nav.timer -= dt; Steering.steer(this, c, spd, dt, Steering.moveGround); }
-                else GoTo(U.w2c(c.x, c.y), 7000, spd, dt);
-            }
-            else
-            {
-                whirlA += 4.2 * dt;          // all go the same way round, so it looks like one swirl
-                Pos p = new Pos(c.x + System.Math.Cos(whirlA) * WHIRL_R, c.y + System.Math.Sin(whirlA) * WHIRL_R * 0.7);
-                Steering.steer(this, p, spd * 1.1, dt, Steering.moveGround);
-            }
-            // how many of us are circling this centre right now
-            int on = 0;
-            foreach (Enemy e in G.enemies)
-            {
-                Shambler s = e as Shambler;
-                if (s != null && !s.dead && s.act == ShamAct.Whirl && s.whirlC != null
-                    && U.dist(s.whirlC, c) < 24 && U.dist(s, c) < WHIRL_R + 22) on++;
-            }
-            if (on >= 2 && d < WHIRL_R + 22) whirlT += dt;
-            if (whirlT >= C.WHIRL_SPIN)
-            {
-                G.MakeTornado(c);
-                foreach (Enemy e in G.enemies)
-                {
-                    Shambler s = e as Shambler;
-                    if (s == null || s.act != ShamAct.Whirl || s.whirlC == null || U.dist(s.whirlC, c) > 24) continue;
-                    s.EndWhirl(C.WHIRL_COOLDOWN);
-                }
-                return;
-            }
-            if (whirlWait > 6) EndWhirl(6);    // nobody came to help: give up for a while
-        }
-
-        public void EndWhirl(double cd)
-        {
-            whirlCd = cd;
-            whirlT = 0;
-            whirlWait = 0;
-            whirlC = null;
-            act = ShamAct.RaidTree;
-            thinkT = 0;
-            nav.Reset();
-        }
-
-        public double WhirlProgress { get { return act == ShamAct.Whirl ? U.clamp(whirlT / C.WHIRL_SPIN, 0, 1) : 0; } }
 
         void DoFlee(double spd, double dt)
         {

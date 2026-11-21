@@ -86,7 +86,6 @@ namespace Orchard
         double memory;
         double fpx = double.NaN, fpy, fvx, fvy;  // farmer velocity estimate
         Navigator nav = new Navigator();
-        double biteCd = 0;
         public bool Searching { get { return !sees && memory > 0; } }
 
         const double HALF_FOV = 70 * System.Math.PI / 180;
@@ -118,16 +117,6 @@ namespace Orchard
             fpx = G.farmer.x; fpy = G.farmer.y;
 
             double d = U.dist(this, G.farmer);
-            if (biteCd > 0) biteCd -= dt;
-            if (d < 26 && biteCd <= 0 && G.running)
-            {
-                biteCd = C.STALKER_HIT_CD;
-                if (G.farmer.Hurt(C.STALKER_DMG))
-                {
-                    G.LogEvent("Stalker bit the farmer (hp " + System.Math.Ceiling(G.farmer.hp) + "/" + C.FARMER_HP + ")");
-                    if (G.farmer.hp <= 0) G.FarmerDown();
-                }
-            }
             bool can;
             if (sees) can = d < sight * 1.2 && Perception.LineOfSight(this, G.farmer);
             else can = d < sight && (d < C.CELL * 1.5 || InView(G.farmer)) && Perception.LineOfSight(this, G.farmer);
@@ -195,19 +184,6 @@ namespace Orchard
         public Pos roam;
         public double killCd = 0;
         public Pos tt;
-        public double confT, noEatT;     // dizzy from a shambler tornado / not allowed to eat yet
-        public Pos spinC;                // the tornado it is spinning round
-        double spinA;
-
-        // caught in a dust tornado: spin round it for CONFUSE_T, cannot eat fruit for NO_EAT_T
-        public void Confuse(Pos centre)
-        {
-            confT = C.CONFUSE_T;
-            noEatT = C.NO_EAT_T;
-            spinC = new Pos(centre.x, centre.y);
-            spinA = System.Math.Atan2(y - centre.y, x - centre.x);
-            tt = null;
-        }
 
         public Bird(double x, double y, bool bad) : base(x, y, bad ? "bad" : "scatterling")
         {
@@ -234,8 +210,6 @@ namespace Orchard
             OrchardGame G = U.G;
             bob += dt * 6;
             if (killCd > 0) killCd -= dt;
-            if (confT > 0) confT -= dt;
-            if (noEatT > 0) noEatT -= dt;
 
             // boids over birds of my own kind
             double sx = 0, sy = 0, ax = 0, ay = 0, cx = 0, cy = 0;
@@ -273,7 +247,7 @@ namespace Orchard
             }
 
             // both birds chase fallen fruit; if none, roam the sky
-            Bait goal = (bad || noEatT <= 0) ? nearBait() : null;   // a dizzy scatterling cannot eat
+            Bait goal = nearBait();
             if (goal != null)
             {
                 double dx = goal.x - x, dy = goal.y - y;
@@ -288,7 +262,7 @@ namespace Orchard
                     {
                         G.baits.RemoveAt(i);
                         if (bad) { G.fruitLost++; G.LogEvent("Bad bird stole a fruit"); }
-                        else { G.fruitSaved++; G.birdSaved++; G.LogEvent("Scatterling saved a fruit"); }
+                        else { G.fruitSaved++; G.birdSaved++; G.LogEvent("Scatterling saved a fruit"); G.CheckRevive(); }
                     }
                 }
             }
@@ -332,23 +306,12 @@ namespace Orchard
                     if (o.type == "scatterling" && !o.dead && U.dist(this, o) < C.CELL * 0.55)
                     {
                         o.dead = true;
+                        G.BirdCaught((Bird)o);
                         killCd = C.KILL_COOLDOWN;
                         G.LogEvent("Bad bird caught a scatterling");
                         break;
                     }
                 }
-            }
-
-            // dizzy: forget the flock and the fruit, just spin round the tornado (wobbling in and out)
-            if (confT > 0 && spinC != null)
-            {
-                spinA += dt * 5.5;
-                double rr = C.CELL * (0.8 + 0.35 * System.Math.Sin(bob * 0.9));
-                double tx = spinC.x + System.Math.Cos(spinA) * rr, ty = spinC.y + System.Math.Sin(spinA) * rr * 0.75;
-                double dx = tx - x, dy = ty - y;
-                double l = U.hypot(dx, dy);
-                if (l == 0) l = 1;
-                fx = dx / l * 2.5; fy = dy / l * 2.5;
             }
 
             // predator avoidance: a scatterling flees from bad birds closing in (strongest when very close),
@@ -361,7 +324,7 @@ namespace Orchard
                     double d = U.dist(this, o);
                     if (d < C.CELL * 2.5 && d > 0.01)
                     {
-                        double w = (1 - d / (C.CELL * 2.5)) * (confT > 0 ? 1.0 : 3.2);   // dizzy birds dodge badly
+                        double w = (1 - d / (C.CELL * 2.5)) * 3.2;
                         fx += (x - o.x) / d * w;
                         fy += (y - o.y) / d * w;
                     }
